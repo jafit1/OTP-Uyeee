@@ -948,7 +948,7 @@ export default function OtpDashboard() {
             <p className="neo-badge mb-2">OTP Uyeee</p>
             <h1 className="text-lg font-black leading-tight md:text-2xl">Soft Brutalism OTP Command Center</h1>
             <p className="mt-1 text-[11px] font-semibold text-zinc-400">
-              Compact mode + endpoint resmi token-based: /api/rent → /api/sms/{token}.
+              Compact mode + endpoint resmi token-based.
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">
