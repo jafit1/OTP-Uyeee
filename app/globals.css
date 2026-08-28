@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
+}
+
+* {
+  @apply border-ink;
+}
+
+body {
+  @apply min-h-screen bg-zinc-950 text-zinc-100 antialiased;
+  background-image: radial-gradient(circle at 8% 10%, #3f3f4622 0%, transparent 34%),
+    radial-gradient(circle at 92% 18%, #0f172a66 0%, transparent 30%);
+}
+
+@layer components {
+  .neo-card {
+    @apply rounded-xl border-2 border-zinc-700 bg-zinc-900 text-zinc-100 shadow-neo;
+  }
+
+  .neo-glass {
+    @apply rounded-xl border-2 border-zinc-700 bg-zinc-900/95 text-zinc-100 shadow-neo;
+  }
+
+  .neo-input {
+    @apply w-full rounded-lg border-2 border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-semibold text-zinc-100 outline-none transition focus:-translate-y-[1px] focus:shadow-neo-sm;
+  }
+
+  .neo-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border-2 border-zinc-700 px-3.5 py-2 text-xs font-extrabold transition duration-150 ease-out active:translate-x-1 active:translate-y-1 active:scale-[0.99] active:shadow-none disabled:cursor-not-allowed disabled:opacity-60;
+    box-shadow: 3px 3px 0px #000000;
+  }
+
+  .neo-btn-sm {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border-2 border-zinc-700 px-2.5 py-1.5 text-[11px] font-extrabold transition duration-150 ease-out active:translate-x-1 active:translate-y-1 active:scale-[0.99] active:shadow-none;
+    box-shadow: 2px 2px 0px #000000;
+  }
+
+  .neo-badge {
+    @apply inline-flex items-center rounded-md border-2 border-zinc-600 bg-zinc-800 px-2.5 py-1 text-[11px] font-extrabold text-zinc-200;
+  }
+
+  .neo-menu-item {
+    @apply rounded-md border-2 border-transparent px-2.5 py-1.5 text-xs font-bold transition duration-150 ease-out hover:border-zinc-500 hover:bg-zinc-800 active:translate-y-[1px] active:scale-[0.99];
+  }
+
+  .neo-stat {
+    @apply rounded-lg border-2 border-zinc-700 bg-zinc-900 p-2.5 shadow-neo-sm transition-transform duration-200 ease-out;
+  }
+
+  .neo-panel {
+    @apply transition-all duration-200 ease-out;
+  }
+
+  .otp-progress-track {
+    @apply mt-2 h-2 w-full overflow-hidden rounded-full border border-zinc-600 bg-zinc-800;
+  }
+
+  .otp-progress-bar {
+    @apply h-full bg-zinc-300 transition-[width] duration-200 ease-linear;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #18181b 20%, #27272a 40%, #18181b 65%);
+  background-size: 300% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+button {
+  will-change: transform;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@keyframes statusPop {
+  0% {
+    transform: translateY(1px) scale(0.98);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.status-pop {
+  animation: statusPop 220ms ease-out;
+}
+
+.scroll-hidden {
+  scrollbar-width: none;
+}
+
+.scroll-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes softBlink {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.loading-dots span {
+  animation: softBlink 1s infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
