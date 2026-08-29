@@ -67,7 +67,29 @@
   document.addEventListener('click', (event) => { if (!event.target.closest('.custom-select')) closeDropdowns() })
 
   $('#connect-button').addEventListener('click', async () => { const button = $('#connect-button'); const connection = config(); if (!connection.apiKey) return message('Masukkan API key terlebih dahulu.'); busy(button, true, 'Menghubungkan…'); try { const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: connection }), call('/api/otp/balance', { providerConfig: connection })]); state.config = connection; state.services = services.services; saveStoredConfig(connection); $('#revoke-button').hidden = false; const serviceInput = $('#service-select'); const serviceTrigger = $('#service-trigger'); const serviceOptions = $('#service-options'); serviceOptions.innerHTML = state.services.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join(''); serviceInput.disabled = !state.services.length; serviceTrigger.disabled = !state.services.length; $('#order-button').disabled = !state.services.length; if (state.services.length) selectValue($('#service-dropdown'), state.services[0].id, state.services[0].name); $('#balance-box').hidden = false; $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available); status(`${state.services.length} layanan aktif`, 'is-success'); message('Provider & API Key berhasil tersimpan.', 'success') } catch (error) { status('Koneksi gagal', 'is-failed'); message(error.message) } finally { busy(button, false) } })
-  $('#order-button').addEventListener('click', async () => { if (!state.config) return message('Hubungkan provider terlebih dahulu.'); const button = $('#order-button'); busy(button, true, 'Membuat order…'); try { state.order = await call('/api/otp/order', { providerConfig: state.config, serviceId: $('#service-select').value }); renderOrder(); addHistory('WAITING'); message('Order berhasil dibuat. Kode dapat diperiksa secara manual.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
+  $('#order-button').addEventListener('click', async () => {
+    if (!state.config) return message('Hubungkan provider terlebih dahulu di Pengaturan.');
+    const serviceId = $('#service-select').value;
+    if (!serviceId) return message('Silakan pilih layanan terlebih dahulu.');
+    const button = $('#order-button');
+    busy(button, true, 'Membuat order…');
+    try {
+      state.order = await call('/api/otp/order', { providerConfig: state.config, serviceId });
+      renderOrder();
+      addHistory('WAITING');
+      message('Order berhasil dibuat. Kode OTP siap dicek.', 'success');
+    } catch (error) {
+      let msg = error.message;
+      if (msg.includes('balance') || msg.includes('saldo') || msg.includes('insufficient') || msg.includes('money') || msg.includes('credit')) {
+        msg = 'Saldo provider Anda tidak mencukupi untuk membuat order ini.';
+      } else if (msg.includes('missing service_id')) {
+        msg = 'Layanan belum dipilih atau ID layanan tidak valid.';
+      }
+      message(msg);
+    } finally {
+      busy(button, false);
+    }
+  })
   $('#check-button').addEventListener('click', async () => { if (!state.order) return; const button = $('#check-button'); busy(button, true, 'Memeriksa…'); try { const data = await call('/api/otp/check', { providerConfig: state.config, token: state.order.token }); Object.assign(state.order, data); renderOrder(); addHistory(data.status); if (data.otp_code) message('Kode verifikasi berhasil diterima.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
   $('#cancel-button').addEventListener('click', async () => { if (!state.order || !confirm('Batalkan order ini?')) return; const button = $('#cancel-button'); busy(button, true, 'Membatalkan…'); try { await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' }); state.order.status = 'CANCELLED'; renderOrder(); addHistory('CANCELLED'); message('Order berhasil dibatalkan.', 'success'); setTimeout(() => { state.order = null; renderOrder(); }, 1500); } catch (error) { message(error.message) } finally { busy(button, false) } })
   $('#copy-button').addEventListener('click', async () => { if (!state.order) return; try { await navigator.clipboard.writeText(state.order.number); message('Nomor disalin ke clipboard.', 'success') } catch { message('Browser tidak mengizinkan clipboard.') } })
