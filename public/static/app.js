@@ -128,9 +128,19 @@
 
   // Timer Tick Every Second
   setInterval(() => {
-    if (state.orders.some(o => o.status === 'WAITING')) {
-      renderOrders()
-    }
+    state.orders.forEach(order => {
+      if (order.status !== 'WAITING') return
+      const tokenEscaped = String(order.token).replace(/"/g, '\\"')
+      const cardTimer = document.querySelector(`.order-card[data-token="${tokenEscaped}"] .order-card-timer`)
+      if (!cardTimer) return
+      
+      const remainingSec = Math.max(0, Math.floor((order.expireTime - Date.now()) / 1000))
+      const mins = String(Math.floor(remainingSec / 60)).padStart(2, '0')
+      const secs = String(remainingSec % 60).padStart(2, '0')
+      
+      cardTimer.textContent = `⏱ ${mins}:${secs}`
+      if (remainingSec === 0) cardTimer.classList.add('is-expired')
+    })
   }, 1000)
 
   // Auto Poll WAITING orders every 5s
