@@ -1,6 +1,6 @@
 (() => {
   const $ = (selector) => document.querySelector(selector)
-  const state = { config: null, services: [], order: null, history: [] }
+  const state = { config: null, services: [], orders: [], history: [] }
   const themeKey = 'veriflow-theme'
   const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
 
@@ -24,7 +24,7 @@
     modal.hidden = false
     requestAnimationFrame(() => modal.classList.add('is-visible'))
     clearTimeout(message.timer)
-    message.timer = setTimeout(closeNotification, 3000)
+    message.timer = setTimeout(closeNotification, 3500)
   }
 
   // Custom Confirm Modal
@@ -59,50 +59,111 @@
   function refreshMetrics() { $('#metric-total').textContent = state.history.length; $('#metric-success').textContent = state.history.filter(x => x.status === 'RECEIVED').length; $('#metric-waiting').textContent = state.history.filter(x => x.status === 'WAITING').length }
   function renderHistory() { const body = $('#history-body'); if (!state.history.length) { body.innerHTML = '<tr><td colspan="4" class="empty-state">Belum ada aktivitas.</td></tr>'; return }; body.innerHTML = state.history.map(x => `<tr><td>${x.time}</td><td>${escapeHtml(x.service)}</td><td>${escapeHtml(x.number)}</td><td class="table-status">${x.status}</td></tr>`).join('') }
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char])) }
-  function addHistory(statusValue) { if (!state.order) return; const entry = { time: new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()), service: $('#service-search')?.value || state.order.service_id, number: state.order.number, status: statusValue }; const current = state.history.findIndex(x => x.number === entry.number); if (current >= 0) state.history[current] = entry; else state.history.unshift(entry); state.history = state.history.slice(0, 30); refreshMetrics(); renderHistory() }
-  function renderOrder() {
-    const order = state.order
-    const detailsContent = $('#order-details-content')
+  
+  function addHistoryEntry(orderObj, statusValue) {
+    if (!orderObj) return
+    const entry = {
+      time: new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()),
+      service: orderObj.service_name || orderObj.service_id,
+      number: orderObj.number,
+      status: statusValue
+    }
+    const current = state.history.findIndex(x => x.number === entry.number)
+    if (current >= 0) state.history[current] = entry
+    else state.history.unshift(entry)
+    state.history = state.history.slice(0, 50)
+    refreshMetrics()
+    renderHistory()
+  }
+
+  // Multi-Order Rendering & Timer
+  function renderOrders() {
+    const grid = $('#orders-grid')
     const placeholder = $('#no-order-placeholder')
-    
-    if (!order) {
-      if (detailsContent) detailsContent.hidden = true
+    const checkAllBtn = $('#check-all-button')
+
+    if (!state.orders.length) {
       if (placeholder) placeholder.hidden = false
+      if (grid) grid.innerHTML = ''
+      if (checkAllBtn) checkAllBtn.style.display = 'none'
       return
     }
 
     if (placeholder) placeholder.hidden = true
-    if (detailsContent) detailsContent.hidden = false
+    if (checkAllBtn) checkAllBtn.style.display = 'inline-flex'
 
-    const selectedService = state.services.find(s => String(s.id) === String(order.service_id))
-    const serviceName = selectedService ? selectedService.name : `Layanan ${order.service_id}`
+    grid.innerHTML = state.orders.map(order => {
+      const isDone = order.status === 'RECEIVED' || order.status === 'CANCELLED' || order.status === 'FAILED'
+      const statusClass = order.status === 'RECEIVED' ? 'is-success' : isDone ? 'is-failed' : 'is-waiting'
+      const statusLabel = order.status === 'WAITING' ? 'MENUNGGU OTP' : order.status === 'RECEIVED' ? 'BERHASIL' : 'DIBATALKAN'
+      const remainingSec = Math.max(0, Math.floor((order.expireTime - Date.now()) / 1000))
+      const mins = String(Math.floor(remainingSec / 60)).padStart(2, '0')
+      const secs = String(remainingSec % 60).padStart(2, '0')
+      const timerStr = isDone ? '' : `⏱ ${mins}:${secs}`
 
-    $('#order-service').textContent = serviceName
-    $('#order-number').textContent = order.number
-    $('#otp-code').textContent = order.otp_code || 'Belum tersedia'
-    
-    const pill = $('#order-state')
-    let stateText = order.status
-    if (order.status === 'WAITING') stateText = 'MENUNGGU OTP'
-    else if (order.status === 'RECEIVED') stateText = 'BERHASIL'
-    else if (order.status === 'CANCELLED' || order.status === 'FAILED') stateText = 'DIBATALKAN'
-    
-    pill.textContent = stateText
-    pill.className = `status-pill ${order.status === 'RECEIVED' ? 'is-success' : order.status === 'FAILED' || order.status === 'CANCELLED' ? 'is-failed' : 'is-waiting'}`
-    
-    $('#check-button').disabled = order.status === 'CANCELLED' || order.status === 'RECEIVED'
-    $('#cancel-button').disabled = order.status === 'CANCELLED' || order.status === 'RECEIVED'
+      return `
+        <div class="order-card" data-token="${escapeHtml(order.token)}">
+          <div class="order-card-header">
+            <div>
+              <span class="status-pill ${statusClass}">${statusLabel}</span>
+              <div class="order-card-title" style="margin-top:4px;">${escapeHtml(order.service_name)}</div>
+            </div>
+            ${timerStr ? `<div class="order-card-timer ${remainingSec === 0 ? 'is-expired' : ''}">${timerStr}</div>` : ''}
+          </div>
+          <div class="order-card-phone">
+            <span>${escapeHtml(order.number)}</span>
+            <button class="copy-icon btn-copy-card" type="button" data-phone="${escapeHtml(order.number)}" title="Salin Nomor">📋</button>
+          </div>
+          <div class="order-card-otp">
+            ${order.otp_code ? escapeHtml(order.otp_code) : '<span style="font-size:12px;color:var(--muted);font-weight:500;">Menunggu kode...</span>'}
+          </div>
+          <div class="order-card-actions">
+            <button class="button button-primary btn-check-card" type="button" ${isDone ? 'disabled' : ''}>🔄 Cek OTP</button>
+            <button class="button button-danger btn-cancel-card" type="button" ${isDone ? 'disabled' : ''}>❌ Batal</button>
+          </div>
+        </div>
+      `
+    }).join('')
   }
+
+  // Timer Tick Every Second
+  setInterval(() => {
+    if (state.orders.some(o => o.status === 'WAITING')) {
+      renderOrders()
+    }
+  }, 1000)
+
+  // Auto Poll WAITING orders every 5s
+  setInterval(async () => {
+    if (!state.config) return
+    const waitingOrders = state.orders.filter(o => o.status === 'WAITING')
+    for (const order of waitingOrders) {
+      try {
+        const data = await call('/api/otp/check', { providerConfig: state.config, token: order.token })
+        if (data.status !== order.status || data.otp_code !== order.otp_code) {
+          order.status = data.status
+          order.otp_code = data.otp_code
+          renderOrders()
+          addHistoryEntry(order, data.status)
+          if (data.otp_code) message(`Kode OTP untuk ${order.number} diterima! (${data.otp_code})`, 'success')
+        }
+      } catch (e) { /* ignore polling error */ }
+    }
+  }, 5000)
+
   function busy(button, active, label) { if (active) { button.dataset.label = button.textContent; button.textContent = label; button.disabled = true } else { button.textContent = button.dataset.label; button.disabled = false } }
 
-  // Service Search Bar
+  // Service Search Bar & Prices Display
   function renderServiceOptions(filter = '') {
     const options = $('#service-options')
     const filtered = state.services.filter(s => s.name.toLowerCase().includes(filter.toLowerCase()))
     if (!filtered.length) {
       options.innerHTML = '<div style="padding:10px;color:var(--muted);font-size:12px;text-align:center;">Layanan tidak ditemukan</div>'
     } else {
-      options.innerHTML = filtered.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join('')
+      options.innerHTML = filtered.map(item => {
+        const priceStr = item.price ? `<span class="option-meta"><span class="service-price">Rp ${Number(item.price).toLocaleString('id-ID')}</span>${item.count ? `<span class="service-count">(${item.count})</span>` : ''}</span>` : ''
+        return `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}"><span>${escapeHtml(item.name)}</span>${priceStr}</button>`
+      }).join('')
     }
   }
 
@@ -127,7 +188,7 @@
       const option = event.target.closest('.select-option')
       if (!option) return
       const value = option.dataset.value
-      const label = option.textContent
+      const label = option.querySelector('span')?.textContent || option.textContent
       $('#service-select').value = value
       searchInput.value = label
       options.hidden = true
@@ -142,6 +203,18 @@
     })
   }
   setupSearchBar()
+
+  // Quantity Control
+  $('#qty-minus')?.addEventListener('click', () => {
+    const input = $('#order-qty')
+    const current = Math.max(1, parseInt(input.value || '1', 10) - 1)
+    input.value = current
+  })
+  $('#qty-plus')?.addEventListener('click', () => {
+    const input = $('#order-qty')
+    const current = Math.min(20, parseInt(input.value || '1', 10) + 1)
+    input.value = current
+  })
 
   // Existing dropdown setup for auth mode
   function closeDropdowns() { document.querySelectorAll('.custom-select:not(#service-dropdown)').forEach(dropdown => { dropdown.classList.remove('is-open'); dropdown.querySelector('.select-options').hidden = true; dropdown.querySelector('.select-trigger')?.setAttribute('aria-expanded', 'false') }) }
@@ -178,69 +251,127 @@
     }
   })
 
+  // Multi-Order Support
   $('#order-button').addEventListener('click', async () => {
     if (!state.config) return message('Hubungkan provider terlebih dahulu di Pengaturan.')
     const serviceId = $('#service-select').value
     if (!serviceId) return message('Silakan pilih layanan terlebih dahulu.')
+    const qty = parseInt($('#order-qty').value || '1', 10)
     const button = $('#order-button')
-    busy(button, true, 'Membuat order…')
-    try {
-      state.order = await call('/api/otp/order', { providerConfig: state.config, serviceId })
-      renderOrder()
-      addHistory('WAITING')
-      message('Order berhasil. Cek kode OTP.', 'success')
+    busy(button, true, `Membuat ${qty} order...`)
+    
+    const selectedService = state.services.find(s => String(s.id) === String(serviceId))
+    const serviceName = selectedService ? selectedService.name : `Layanan ${serviceId}`
+    const isShopee = serviceName.toLowerCase().includes('shopee')
+    const autoCancel = $('#auto-cancel-registered')?.checked ?? true
 
-      // Auto Shopee Check & Auto Cancel (Hanya untuk layanan Shopee)
-      const selectedService = state.services.find(s => String(s.id) === String(serviceId))
-      const serviceName = (selectedService ? selectedService.name : '').toLowerCase()
-      const isShopee = serviceName.includes('shopee')
-      
-      const autoCancel = $('#auto-cancel-registered')?.checked ?? true
-      if (isShopee && autoCancel && state.order && state.order.number) {
+    let createdCount = 0
+    try {
+      for (let i = 0; i < qty; i++) {
         try {
-          const checkRes = await call('/api/shopee/check', { phone: state.order.number })
-          if (checkRes.registered) {
-            await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' })
-            state.order.status = 'CANCELLED'
-            renderOrder()
-            addHistory('CANCELLED')
-            message(`Nomor ${state.order.number} terdaftar Shopee — dibatalkan otomatis.`)
-            setTimeout(() => { state.order = null; renderOrder() }, 2000)
-          } else if (checkRes.available) {
-            message(`Nomor ${state.order.number} aman (belum terdaftar Shopee).`, 'success')
+          const res = await call('/api/otp/order', { providerConfig: state.config, serviceId })
+          const orderObj = {
+            token: res.token,
+            order_id: res.order_id,
+            number: res.number,
+            service_id: serviceId,
+            service_name: serviceName,
+            status: 'WAITING',
+            otp_code: null,
+            expireTime: Date.now() + 15 * 60 * 1000
           }
-        } catch (e) { /* ignore */ }
+          state.orders.unshift(orderObj)
+          renderOrders()
+          addHistoryEntry(orderObj, 'WAITING')
+          createdCount++
+
+          // Auto Shopee Check & Auto Cancel per order
+          if (isShopee && autoCancel && res.number) {
+            (async () => {
+              try {
+                const checkRes = await call('/api/shopee/check', { phone: res.number })
+                if (checkRes.registered) {
+                  await call('/api/otp/action', { providerConfig: state.config, orderRef: res.order_id, action: 'cancel' })
+                  orderObj.status = 'CANCELLED'
+                  renderOrders()
+                  addHistoryEntry(orderObj, 'CANCELLED')
+                  message(`Nomor ${res.number} terdaftar Shopee — dibatalkan otomatis.`)
+                } else if (checkRes.available) {
+                  message(`Nomor ${res.number} aman (belum terdaftar Shopee).`, 'success')
+                }
+              } catch (e) {}
+            })()
+          }
+        } catch (e) {
+          message(`Gagal order ke-${i+1}: ${e.message}`)
+        }
       }
-    } catch (error) {
-      let msg = error.message
-      if (msg.includes('balance') || msg.includes('saldo') || msg.includes('insufficient') || msg.includes('money') || msg.includes('credit') || msg.includes('tidak mencukupi') || msg.includes('400')) {
-        msg = 'Saldo provider tidak mencukupi.'
+      if (createdCount > 0) {
+        message(`Berhasil membuat ${createdCount} order nomor.`, 'success')
       }
-      message(msg)
     } finally {
       busy(button, false)
     }
   })
 
-  $('#check-button').addEventListener('click', async () => { if (!state.order) return; const button = $('#check-button'); busy(button, true, 'Cek…'); try { const data = await call('/api/otp/check', { providerConfig: state.config, token: state.order.token }); Object.assign(state.order, data); renderOrder(); addHistory(data.status); if (data.otp_code) message('Kode verifikasi diterima.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
+  // Event Delegation for Grid Card Buttons
+  $('#orders-grid')?.addEventListener('click', async (event) => {
+    const card = event.target.closest('.order-card')
+    if (!card) return
+    const token = card.dataset.token
+    const order = state.orders.find(o => o.token === token)
+    if (!order) return
 
-  $('#cancel-button').addEventListener('click', async () => {
-    if (!state.order) return
-    const yes = await showConfirm('Batalkan Order?', `Nomor ${state.order.number} akan dibatalkan.`)
-    if (!yes) return
-    const button = $('#cancel-button')
-    busy(button, true, 'Membatalkan…')
-    try {
-      await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' })
-      state.order.status = 'CANCELLED'
-      renderOrder()
-      addHistory('CANCELLED')
-      message('Order dibatalkan.', 'success')
-      setTimeout(() => { state.order = null; renderOrder() }, 1500)
-    } catch (error) { message(error.message) } finally { busy(button, false) }
+    if (event.target.closest('.btn-copy-card')) {
+      const phone = event.target.closest('.btn-copy-card').dataset.phone
+      try { await navigator.clipboard.writeText(phone); message('Nomor disalin.', 'success') } catch { message('Clipboard tidak tersedia.') }
+    } else if (event.target.closest('.btn-check-card')) {
+      const btn = event.target.closest('.btn-check-card')
+      busy(btn, true, 'Cek…')
+      try {
+        const data = await call('/api/otp/check', { providerConfig: state.config, token: order.token })
+        order.status = data.status
+        order.otp_code = data.otp_code
+        renderOrders()
+        addHistoryEntry(order, data.status)
+        if (data.otp_code) message('Kode verifikasi diterima.', 'success')
+        else message('Kode belum tersedia.')
+      } catch (err) { message(err.message) } finally { busy(btn, false) }
+    } else if (event.target.closest('.btn-cancel-card')) {
+      const yes = await showConfirm('Batalkan Order?', `Nomor ${order.number} akan dibatalkan.`)
+      if (!yes) return
+      const btn = event.target.closest('.btn-cancel-card')
+      busy(btn, true, 'Batal…')
+      try {
+        await call('/api/otp/action', { providerConfig: state.config, orderRef: order.order_id, action: 'cancel' })
+        order.status = 'CANCELLED'
+        renderOrders()
+        addHistoryEntry(order, 'CANCELLED')
+        message('Order dibatalkan.', 'success')
+      } catch (err) { message(err.message) } finally { busy(btn, false) }
+    }
   })
 
-  $('#copy-button').addEventListener('click', async () => { if (!state.order) return; try { await navigator.clipboard.writeText(state.order.number); message('Nomor disalin.', 'success') } catch { message('Clipboard tidak tersedia.') } })
+  // Check All Button
+  $('#check-all-button')?.addEventListener('click', async () => {
+    const waitingOrders = state.orders.filter(o => o.status === 'WAITING')
+    if (!waitingOrders.length) return message('Tidak ada order yang menunggu.')
+    const btn = $('#check-all-button')
+    busy(btn, true, 'Memeriksa…')
+    try {
+      for (const order of waitingOrders) {
+        try {
+          const data = await call('/api/otp/check', { providerConfig: state.config, token: order.token })
+          order.status = data.status
+          order.otp_code = data.otp_code
+          addHistoryEntry(order, data.status)
+        } catch (e) {}
+      }
+      renderOrders()
+      message('Pengecekan selesai.', 'success')
+    } finally { busy(btn, false) }
+  })
+
   $('#reveal-key').addEventListener('click', () => { const input = $('#api-key'); input.type = input.type === 'password' ? 'text' : 'password'; $('#reveal-key').textContent = input.type === 'password' ? 'Tampilkan' : 'Sembunyikan' })
   $('#auth-dropdown').addEventListener('selectionchange', () => { $('#header-field').hidden = $('#auth-mode').value !== 'x-api-key' })
   $('.nav-list').addEventListener('click', (event) => { const button = event.target.closest('.nav-link'); if (!button) return; document.querySelectorAll('.nav-link').forEach(x => x.classList.toggle('is-active', x === button)); const view = button.dataset.view; document.querySelectorAll('.view-panel').forEach(x => x.hidden = x.id !== `${view}-view`); $('#page-title').textContent = view === 'dashboard' ? 'Ringkasan aktivitas' : view === 'checker' ? 'Shopee Number Checker' : view === 'activity' ? 'Aktivitas terbaru' : 'Pengaturan tampilan' })
@@ -325,6 +456,8 @@
     removeStoredConfig()
     state.config = null
     state.services = []
+    state.orders = []
+    renderOrders()
     $('#api-key').value = ''
     const searchInput = $('#service-search')
     searchInput.disabled = true

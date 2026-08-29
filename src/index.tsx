@@ -74,6 +74,8 @@ app.post('/api/otp/services', async (c) => {
     const services = items.map((item: any, index) => ({
       id: String(item?.id ?? item?.service_id ?? item?.code ?? index + 1),
       name: String(item?.name ?? item?.service_name ?? item?.service ?? `Layanan ${index + 1}`),
+      price: Number(item?.price || item?.harga || item?.rate || 0),
+      count: Number(item?.count || item?.stok || item?.stock || 0),
     }))
     return c.json({ success: true, services })
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
@@ -312,40 +314,28 @@ app.get('/', (c) => c.render(
                 <input id="service-search" class="select-trigger" type="text" placeholder="Ketik untuk cari layanan..." disabled autocomplete="off" data-lpignore="true" data-1p-ignore="true" />
                 <div id="service-options" class="select-options" role="listbox" hidden></div>
               </div>
-              <button id="order-button" class="button button-primary" type="button" disabled>Minta Nomor Baru</button>
+              <div class="order-qty-row">
+                <div class="qty-input-wrap">
+                  <button id="qty-minus" class="qty-btn" type="button">-</button>
+                  <input id="order-qty" type="number" min="1" max="20" value="1" readonly />
+                  <button id="qty-plus" class="qty-btn" type="button">+</button>
+                </div>
+                <button id="order-button" class="button button-primary" type="button" style="margin-top:0;" disabled>Minta Nomor Baru</button>
+              </div>
             </div>
           </section>
 
           <section class="panel active-order-panel">
-            <div class="panel-heading"><div><p class="eyebrow">MONITOR OTP</p><h2>Status & Kode OTP</h2></div></div>
+            <div class="panel-heading">
+              <div><p class="eyebrow">MONITOR OTP</p><h2>Status & Kode OTP</h2></div>
+              <button id="check-all-button" class="text-button" type="button" style="display:none; font-size:12px;">🔄 Cek Semua</button>
+            </div>
             <div id="active-order-box" class="active-order-box">
               <div id="no-order-placeholder" class="placeholder-state">
                 <span class="placeholder-icon">📱</span>
                 <p>Belum ada order aktif. Silakan pilih layanan di sebelah kiri untuk meminta nomor.</p>
               </div>
-              <div id="order-details-content" hidden>
-                <div class="order-status-badge">
-                  <span id="order-state" class="status-pill is-waiting">MENUNGGU OTP</span>
-                  <h3 id="order-service">Layanan</h3>
-                </div>
-                <div class="order-phone-display">
-                  <span class="label">Nomor Telepon</span>
-                  <div class="phone-row">
-                    <strong id="order-number">—</strong>
-                    <button id="copy-button" class="icon-action-btn" type="button" title="Salin nomor">📋 Salin</button>
-                  </div>
-                </div>
-                <div class="otp-result-box">
-                  <span class="label">Kode OTP Received</span>
-                  <div class="otp-code-wrapper">
-                    <strong id="otp-code">Belum tersedia</strong>
-                  </div>
-                </div>
-                <div class="order-actions-grid">
-                  <button id="check-button" class="button button-primary" type="button">🔄 Cek Kode OTP</button>
-                  <button id="cancel-button" class="button button-danger" type="button">❌ Batalkan Order</button>
-                </div>
-              </div>
+              <div id="orders-grid" class="orders-grid"></div>
             </div>
           </section>
         </div>
