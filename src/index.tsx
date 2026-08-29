@@ -134,6 +134,70 @@ app.post('/api/otp/action', async (c) => {
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
 
+// Cloudflare Worker proxy URL (set di Vercel env: SHOPEE_PROXY_URL)
+// Contoh: https://shopee-proxy.username.workers.dev
+const SHOPEE_PROXY_URL = process.env.SHOPEE_PROXY_URL || ''
+
+function shopeeHeaders() {
+  return {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'X-Shopee-Language': 'id',
+    'X-API-Source': 'pc',
+    'Referer': 'https://shopee.co.id/buyer/login',
+    'Origin': 'https://shopee.co.id',
+    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+  }
+}
+
+async function shopeeCheckDirect(national: string, intl: string) {
+  const headers = shopeeHeaders()
+  // Strategy 1: check_phone_number_registered
+  try {
+    const res = await fetch('https://shopee.co.id/api/v4/account/check_phone_number_registered', {
+      method: 'POST', headers,
+      body: JSON.stringify({ phone_number: intl }),
+    })
+    const t = await res.text()
+    let d: any = {}; try { d = JSON.parse(t) } catch {}
+    if (d && d.error !== 'error_not_found' && d.error !== undefined) {
+      return { registered: d?.data?.is_registered === true, available: d?.data?.is_registered === false && d.error === 0, raw: d, source: 'check_phone' }
+    }
+  } catch {}
+
+  // Strategy 2: request_otp (check without sending - only if proxy available, skip direct)
+  // Strategy 3: get_account_info_by_phone
+  try {
+    const res = await fetch('https://shopee.co.id/api/v4/account/basic/get_account_info_by_phone', {
+      method: 'POST', headers,
+      body: JSON.stringify({ phone: national, phone_number: intl }),
+    })
+    const t = await res.text()
+    let d: any = {}; try { d = JSON.parse(t) } catch {}
+    if (d && d.error !== 'error_not_found') {
+      const isReg = d.data?.userid > 0 || d.data?.user_id > 0 || d.data?.is_registered === true || d.data?.username
+      return { registered: !!isReg, available: !isReg && d.error === 0, raw: d, source: 'get_account_info' }
+    }
+  } catch {}
+
+  // Strategy 4: wallet transfer lookup
+  try {
+    const res = await fetch('https://shopee.co.id/api/v4/wallet/transfer/check_user_by_phone', {
+      method: 'POST', headers,
+      body: JSON.stringify({ phone: national }),
+    })
+    const t = await res.text()
+    let d: any = {}; try { d = JSON.parse(t) } catch {}
+    if (d && d.error !== 'error_not_found') {
+      const isReg = d.data?.userid > 0 || d.data?.user_id > 0 || d.data?.is_registered === true
+      return { registered: !!isReg, available: !isReg && d.error === 0, raw: d, source: 'wallet_check' }
+    }
+  } catch {}
+
+  return null
+}
+
 app.post('/api/shopee/check', async (c) => {
   try {
     const body = await c.req.json<{ phone?: string }>()
@@ -147,50 +211,46 @@ app.post('/api/shopee/check', async (c) => {
     if (intl.startsWith('0')) intl = '62' + intl.slice(1)
     if (!intl.startsWith('62')) intl = '62' + intl
 
-    // 1. Primary check via ShopeePay/Shopee public transfer lookup API
-    const payRes = await fetch('https://shopee.co.id/api/v4/wallet/transfer/check_user_by_phone', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'X-API-Source': 'pc',
-        'X-Shopee-Language': 'id',
-        'Referer': 'https://shopee.co.id/',
-      },
-      body: JSON.stringify({ phone: national })
-    }).catch(() => null)
-
-    let data: any = {}
-    if (payRes && payRes.ok) {
-      try { data = await payRes.json() } catch {}
-    }
-
-    // 2. Secondary check via account basic lookup
-    if (!data || Object.keys(data).length === 0 || data.error === 10001 || data.error === 403) {
-      const accRes = await fetch(`https://shopee.co.id/api/v4/account/basic/get_account_info?phone=${encodeURIComponent(national)}`, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-          'X-Shopee-Language': 'id',
+    // Strategy 1: Try Cloudflare Worker proxy (IP CDN tidak diblokir Shopee)
+    if (SHOPEE_PROXY_URL) {
+      try {
+        const proxyRes = await fetch(SHOPEE_PROXY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: national }),
+          signal: AbortSignal.timeout(10000),
+        })
+        if (proxyRes.ok) {
+          const proxyData = await proxyRes.json() as any
+          if (proxyData?.success && proxyData?.source !== 'all_failed') {
+            return c.json(proxyData)
+          }
         }
-      }).catch(() => null)
-      if (accRes && accRes.ok) {
-        try { data = await accRes.json() } catch {}
-      }
+      } catch {}
     }
 
-    const isReg = data?.data?.userid > 0 || data?.data?.is_registered === true || data?.data?.user_id > 0 || data?.data?.username !== undefined || data?.userid > 0
-    const isAvail = data?.data?.is_registered === false || data?.error === 10002 || (data?.error === 0 && data?.data && !isReg)
-    const isBlocked = !isReg && !isAvail && (data?.error === 10001 || data?.error === 403 || data?.error === 99999)
+    // Strategy 2: Direct check (mungkin berhasil dari IP tertentu)
+    const direct = await shopeeCheckDirect(national, intl)
+    if (direct) {
+      return c.json({
+        success: true,
+        phone: intl,
+        registered: direct.registered,
+        available: direct.available,
+        status_text: direct.registered ? 'TERDAFTAR (UNAVAILABLE)' : direct.available ? 'BELUM TERDAFTAR (AVAILABLE)' : 'STATUS UNKNOWN',
+        source: direct.source,
+        raw: direct.raw,
+      })
+    }
 
+    // Strategy 3: All failed - report as CAPTCHA/blocked
     return c.json({
       success: true,
       phone: intl,
-      registered: !!isReg,
-      available: !!isAvail,
-      status_text: isReg ? 'TERDAFTAR (UNAVAILABLE)' : isAvail ? 'BELUM TERDAFTAR (AVAILABLE)' : isBlocked ? 'CAPTCHA / ANTI-BOT DETECTED' : 'BELUM TERDAFTAR (POTENSIAL)',
-      raw: data
+      registered: false,
+      available: false,
+      status_text: 'CAPTCHA / ANTI-BOT - Shopee memblokir server. Deploy Cloudflare Worker untuk fix.',
+      source: 'all_failed',
     })
   } catch (error) {
     const result = apiError(error)
