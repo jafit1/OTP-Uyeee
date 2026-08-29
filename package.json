@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "echo 'No static build step needed for Vercel Edge functions'"
+    "build": "tsc"
   },
   "dependencies": {
     "hono": "^4.13.5"
