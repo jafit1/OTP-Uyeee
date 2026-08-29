@@ -303,7 +303,8 @@ app.get('/', (c) => c.render(
     </aside>
     <section class="workspace">
       <header class="topbar"><div><p class="eyebrow">PUSAT VERIFIKASI</p><h1 id="page-title">Ringkasan aktivitas</h1></div><div class="topbar-actions"><span id="connection-status" class="status-pill">Belum terhubung</span><button id="theme-toggle" class="icon-button" type="button" aria-label="Ganti tema">☾</button></div></header>
-      <div id="notification-modal" class="notification-modal" role="presentation" hidden><section class="notification-card" role="alertdialog" aria-modal="true" aria-labelledby="notification-title"><span id="notification-icon" class="notification-icon">!</span><div><p id="notification-title" class="notification-title">Pemberitahuan</p><p id="notification-text" class="notification-text"></p></div><button id="notification-close" class="notification-close" type="button" aria-label="Tutup notifikasi">×</button></section></div>
+      <div id="notification-modal" class="notification-modal" role="presentation" hidden><section class="notification-card"><span id="notification-icon" class="notification-icon">!</span><p id="notification-text" class="notification-text"></p><button id="notification-close" class="notification-close" type="button" aria-label="Tutup">×</button></section></div>
+      <div id="confirm-overlay" class="confirm-overlay" hidden><div class="confirm-box"><h3 id="confirm-title">Konfirmasi</h3><p id="confirm-text"></p><div class="confirm-actions"><button id="confirm-cancel" class="confirm-cancel" type="button">Batal</button><button id="confirm-ok" class="confirm-ok" type="button">Ya, Batalkan</button></div></div></div>
       <section id="dashboard-view" class="view-panel">
         <section class="metrics" aria-label="Statistik order"><article class="metric-card"><span>Total order</span><strong id="metric-total">0</strong><small>Dalam sesi ini</small></article><article class="metric-card"><span>Berhasil</span><strong id="metric-success">0</strong><small>Kode telah diterima</small></article><article class="metric-card"><span>Menunggu</span><strong id="metric-waiting">0</strong><small>Perlu ditindaklanjuti</small></article></section>
         <div class="content-grid">
@@ -311,13 +312,10 @@ app.get('/', (c) => c.render(
             <div class="panel-heading"><div><p class="eyebrow">ORDER LAYANAN</p><h2>Pilih Layanan</h2></div><div id="balance-box" class="balance-box-pill" hidden><span>Saldo:</span> <strong id="balance-value">—</strong></div></div>
             <p class="muted">Pilih aplikasi/layanan yang ingin Anda dapatkan nomor OTP-nya.</p>
             <div id="order-form-container">
-              <label class="field-label" for="service-select">Daftar Layanan Tersedia</label>
+              <label class="field-label" for="service-search">Daftar Layanan Tersedia</label>
               <div id="service-dropdown" class="custom-select">
                 <input id="service-select" type="hidden" disabled />
-                <button id="service-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" disabled>
-                  <span id="service-label">Hubungkan provider di Pengaturan terlebih dahulu</span>
-                  <span class="select-chevron">⌄</span>
-                </button>
+                <input id="service-search" class="select-trigger" type="text" placeholder="Ketik untuk cari layanan..." disabled autocomplete="off" />
                 <div id="service-options" class="select-options" role="listbox" hidden></div>
               </div>
               <button id="order-button" class="button button-primary" type="button" disabled>Minta Nomor Baru</button>
@@ -367,7 +365,7 @@ app.get('/', (c) => c.render(
             
             <label class="field-label" for="check-phone-input">Nomor Telepon (Cek Manual)</label>
             <div class="input-row">
-              <input id="check-phone-input" type="text" placeholder="Contoh: 08123456789 atau 628123456789" />
+              <input id="check-phone-input" type="text" placeholder="Contoh: 08123456789 atau 628123456789" autocomplete="off" />
               <button id="run-check-button" class="button button-primary" type="button" style="margin-top:0; width:auto; min-width:110px;">Cek Nomor</button>
             </div>
 

@@ -12,8 +12,42 @@
     $('#theme-toggle').textContent = document.documentElement.dataset.theme === 'dark' ? '☀' : '☾'
     document.querySelectorAll('[data-theme-choice]').forEach((button) => button.classList.toggle('is-selected', button.dataset.themeChoice === selected))
   }
-  function closeNotification() { const modal = $('#notification-modal'); modal.classList.remove('is-visible'); clearTimeout(message.timer); setTimeout(() => { if (!modal.classList.contains('is-visible')) modal.hidden = true }, 220) }
-  function message(text, kind = 'error') { const modal = $('#notification-modal'); $('#notification-text').textContent = text; $('#notification-title').textContent = kind === 'success' ? 'Berhasil' : 'Perlu perhatian'; $('#notification-icon').textContent = kind === 'success' ? '✓' : '!'; modal.classList.toggle('is-success', kind === 'success'); modal.hidden = false; requestAnimationFrame(() => modal.classList.add('is-visible')); clearTimeout(message.timer); message.timer = setTimeout(closeNotification, 4200) }
+
+  // Notification (elegant, top-center, small)
+  function closeNotification() { const modal = $('#notification-modal'); modal.classList.remove('is-visible'); clearTimeout(message.timer); setTimeout(() => { if (!modal.classList.contains('is-visible')) modal.hidden = true }, 200) }
+  function message(text, kind = 'error') {
+    const modal = $('#notification-modal')
+    const icon = $('#notification-icon')
+    $('#notification-text').textContent = text
+    icon.textContent = kind === 'success' ? '✓' : '!'
+    modal.classList.toggle('is-success', kind === 'success')
+    modal.hidden = false
+    requestAnimationFrame(() => modal.classList.add('is-visible'))
+    clearTimeout(message.timer)
+    message.timer = setTimeout(closeNotification, 3000)
+  }
+
+  // Custom Confirm Modal
+  function showConfirm(title, text) {
+    return new Promise(resolve => {
+      const overlay = $('#confirm-overlay')
+      $('#confirm-title').textContent = title
+      $('#confirm-text').textContent = text
+      overlay.hidden = false
+      requestAnimationFrame(() => overlay.classList.add('is-visible'))
+      const onOk = () => { cleanup(); resolve(true) }
+      const onCancel = () => { cleanup(); resolve(false) }
+      const cleanup = () => {
+        overlay.classList.remove('is-visible')
+        setTimeout(() => { overlay.hidden = true }, 180)
+        $('#confirm-ok').removeEventListener('click', onOk)
+        $('#confirm-cancel').removeEventListener('click', onCancel)
+      }
+      $('#confirm-ok').addEventListener('click', onOk)
+      $('#confirm-cancel').addEventListener('click', onCancel)
+    })
+  }
+
   function config() { return { apiKey: $('#api-key').value.trim(), authMode: $('#auth-mode').value, apiKeyHeader: $('#header-name').value.trim() || 'x-api-key' } }
   async function call(path, body) {
     const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -25,7 +59,7 @@
   function refreshMetrics() { $('#metric-total').textContent = state.history.length; $('#metric-success').textContent = state.history.filter(x => x.status === 'RECEIVED').length; $('#metric-waiting').textContent = state.history.filter(x => x.status === 'WAITING').length }
   function renderHistory() { const body = $('#history-body'); if (!state.history.length) { body.innerHTML = '<tr><td colspan="4" class="empty-state">Belum ada aktivitas.</td></tr>'; return }; body.innerHTML = state.history.map(x => `<tr><td>${x.time}</td><td>${escapeHtml(x.service)}</td><td>${escapeHtml(x.number)}</td><td class="table-status">${x.status}</td></tr>`).join('') }
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char])) }
-  function addHistory(statusValue) { if (!state.order) return; const entry = { time: new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()), service: $('#service-label').textContent || state.order.service_id, number: state.order.number, status: statusValue }; const current = state.history.findIndex(x => x.number === entry.number); if (current >= 0) state.history[current] = entry; else state.history.unshift(entry); state.history = state.history.slice(0, 30); refreshMetrics(); renderHistory() }
+  function addHistory(statusValue) { if (!state.order) return; const entry = { time: new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()), service: $('#service-search')?.value || state.order.service_id, number: state.order.number, status: statusValue }; const current = state.history.findIndex(x => x.number === entry.number); if (current >= 0) state.history[current] = entry; else state.history.unshift(entry); state.history = state.history.slice(0, 30); refreshMetrics(); renderHistory() }
   function renderOrder() {
     const order = state.order
     const detailsContent = $('#order-details-content')
@@ -60,101 +94,186 @@
     $('#cancel-button').disabled = order.status === 'CANCELLED' || order.status === 'RECEIVED'
   }
   function busy(button, active, label) { if (active) { button.dataset.label = button.textContent; button.textContent = label; button.disabled = true } else { button.textContent = button.dataset.label; button.disabled = false } }
-  function closeDropdowns() { document.querySelectorAll('.custom-select').forEach(dropdown => { dropdown.classList.remove('is-open'); dropdown.querySelector('.select-options').hidden = true; dropdown.querySelector('.select-trigger').setAttribute('aria-expanded', 'false') }) }
-  function selectValue(dropdown, value, label) { const input = dropdown.querySelector('input'); input.value = value; dropdown.querySelector('.select-trigger span:first-child').textContent = label; dropdown.querySelectorAll('.select-option').forEach(option => { const selected = option.dataset.value === String(value); option.classList.toggle('is-selected', selected); option.setAttribute('aria-selected', String(selected)) }); closeDropdowns(); dropdown.dispatchEvent(new CustomEvent('selectionchange', { bubbles: true, detail: { value, label } })) }
-  function setupDropdown(dropdown) { const trigger = dropdown.querySelector('.select-trigger'); const options = dropdown.querySelector('.select-options'); trigger.addEventListener('click', () => { if (trigger.disabled) return; const isOpen = dropdown.classList.toggle('is-open'); options.hidden = !isOpen; trigger.setAttribute('aria-expanded', String(isOpen)) }); options.addEventListener('click', (event) => { const option = event.target.closest('.select-option'); if (option) selectValue(dropdown, option.dataset.value, option.textContent) }) }
-  document.querySelectorAll('.custom-select').forEach(setupDropdown)
+
+  // Service Search Bar
+  function renderServiceOptions(filter = '') {
+    const options = $('#service-options')
+    const filtered = state.services.filter(s => s.name.toLowerCase().includes(filter.toLowerCase()))
+    if (!filtered.length) {
+      options.innerHTML = '<div style="padding:10px;color:var(--muted);font-size:12px;text-align:center;">Layanan tidak ditemukan</div>'
+    } else {
+      options.innerHTML = filtered.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join('')
+    }
+  }
+
+  function setupSearchBar() {
+    const searchInput = $('#service-search')
+    const options = $('#service-options')
+    const dropdown = $('#service-dropdown')
+
+    searchInput.addEventListener('focus', () => {
+      if (searchInput.disabled) return
+      renderServiceOptions(searchInput.value)
+      options.hidden = false
+      dropdown.classList.add('is-open')
+    })
+
+    searchInput.addEventListener('input', () => {
+      renderServiceOptions(searchInput.value)
+      options.hidden = false
+    })
+
+    options.addEventListener('click', (event) => {
+      const option = event.target.closest('.select-option')
+      if (!option) return
+      const value = option.dataset.value
+      const label = option.textContent
+      $('#service-select').value = value
+      searchInput.value = label
+      options.hidden = true
+      dropdown.classList.remove('is-open')
+    })
+
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('#service-dropdown')) {
+        options.hidden = true
+        dropdown.classList.remove('is-open')
+      }
+    })
+  }
+  setupSearchBar()
+
+  // Existing dropdown setup for auth mode
+  function closeDropdowns() { document.querySelectorAll('.custom-select:not(#service-dropdown)').forEach(dropdown => { dropdown.classList.remove('is-open'); dropdown.querySelector('.select-options').hidden = true; dropdown.querySelector('.select-trigger')?.setAttribute('aria-expanded', 'false') }) }
+  function selectValue(dropdown, value, label) { const input = dropdown.querySelector('input[type="hidden"]'); if (input) input.value = value; const trigger = dropdown.querySelector('.select-trigger'); if (trigger) { const span = trigger.querySelector('span:first-child'); if (span) span.textContent = label; } dropdown.querySelectorAll('.select-option').forEach(option => { const selected = option.dataset.value === String(value); option.classList.toggle('is-selected', selected); option.setAttribute('aria-selected', String(selected)) }); closeDropdowns(); dropdown.dispatchEvent(new CustomEvent('selectionchange', { bubbles: true, detail: { value, label } })) }
+  function setupDropdown(dropdown) { const trigger = dropdown.querySelector('.select-trigger'); const options = dropdown.querySelector('.select-options'); if (!trigger || !options) return; trigger.addEventListener('click', () => { if (trigger.disabled) return; const isOpen = dropdown.classList.toggle('is-open'); options.hidden = !isOpen; trigger.setAttribute('aria-expanded', String(isOpen)) }); options.addEventListener('click', (event) => { const option = event.target.closest('.select-option'); if (option) selectValue(dropdown, option.dataset.value, option.textContent) }) }
+  document.querySelectorAll('.custom-select:not(#service-dropdown)').forEach(setupDropdown)
   document.addEventListener('click', (event) => { if (!event.target.closest('.custom-select')) closeDropdowns() })
 
-  $('#connect-button').addEventListener('click', async () => { const button = $('#connect-button'); const connection = config(); if (!connection.apiKey) return message('Masukkan API key terlebih dahulu.'); busy(button, true, 'Menghubungkan…'); try { const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: connection }), call('/api/otp/balance', { providerConfig: connection })]); state.config = connection; state.services = services.services; saveStoredConfig(connection); $('#revoke-button').hidden = false; const serviceInput = $('#service-select'); const serviceTrigger = $('#service-trigger'); const serviceOptions = $('#service-options'); serviceOptions.innerHTML = state.services.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join(''); serviceInput.disabled = !state.services.length; serviceTrigger.disabled = !state.services.length; $('#order-button').disabled = !state.services.length; if (state.services.length) selectValue($('#service-dropdown'), state.services[0].id, state.services[0].name); $('#balance-box').hidden = false; $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available); status(`${state.services.length} layanan aktif`, 'is-success'); message('Provider & API Key berhasil tersimpan.', 'success') } catch (error) { status('Koneksi gagal', 'is-failed'); message(error.message) } finally { busy(button, false) } })
-  $('#order-button').addEventListener('click', async () => {
-    if (!state.config) return message('Hubungkan provider terlebih dahulu di Pengaturan.');
-    const serviceId = $('#service-select').value;
-    if (!serviceId) return message('Silakan pilih layanan terlebih dahulu.');
-    const button = $('#order-button');
-    busy(button, true, 'Membuat order…');
+  $('#connect-button').addEventListener('click', async () => {
+    const button = $('#connect-button')
+    const connection = config()
+    if (!connection.apiKey) return message('Masukkan API key terlebih dahulu.')
+    busy(button, true, 'Menghubungkan…')
     try {
-      state.order = await call('/api/otp/order', { providerConfig: state.config, serviceId });
-      renderOrder();
-      addHistory('WAITING');
-      message('Order berhasil dibuat. Kode OTP siap dicek.', 'success');
-
-      // Auto Shopee Check & Auto Cancel if enabled
-      const autoCancel = $('#auto-cancel-registered')?.checked ?? true;
-      if (autoCancel && state.order && state.order.number) {
-        message('Memeriksa pendaftaran Shopee untuk nomor baru…', 'success');
-        try {
-          const checkRes = await call('/api/shopee/check', { phone: state.order.number });
-          if (checkRes.registered) {
-            message(`Nomor ${state.order.number} TERDAFTAR di Shopee! Membatalkan order otomatis...`);
-            await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' });
-            state.order.status = 'CANCELLED';
-            renderOrder();
-            addHistory('CANCELLED');
-            message(`Nomor ${state.order.number} sudah terdaftar Shopee & berhasil dibatalkan otomatis!`);
-            setTimeout(() => { state.order = null; renderOrder(); }, 2000);
-          } else if (checkRes.available) {
-            message(`Nomor ${state.order.number} BELUM TERDAFTAR di Shopee! Silakan lanjutkan.`, 'success');
-          }
-        } catch (e) {
-          // ignore auto check error
-        }
-      }
+      const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: connection }), call('/api/otp/balance', { providerConfig: connection })])
+      state.config = connection
+      state.services = services.services
+      saveStoredConfig(connection)
+      $('#revoke-button').hidden = false
+      const searchInput = $('#service-search')
+      searchInput.disabled = !state.services.length
+      searchInput.placeholder = state.services.length ? `Cari di ${state.services.length} layanan...` : 'Tidak ada layanan'
+      renderServiceOptions()
+      $('#order-button').disabled = !state.services.length
+      $('#balance-box').hidden = false
+      $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available)
+      status(`${state.services.length} layanan aktif`, 'is-success')
+      message('Provider & API Key berhasil tersimpan.', 'success')
     } catch (error) {
-      let msg = error.message;
-      if (msg.includes('balance') || msg.includes('saldo') || msg.includes('insufficient') || msg.includes('money') || msg.includes('credit') || msg.includes('tidak mencukupi') || msg.includes('400')) {
-        msg = 'Saldo provider Anda tidak mencukupi atau transaksi ditolak oleh provider.';
-      }
-      message(msg);
+      status('Koneksi gagal', 'is-failed')
+      message(error.message)
     } finally {
-      busy(button, false);
+      busy(button, false)
     }
   })
-  $('#check-button').addEventListener('click', async () => { if (!state.order) return; const button = $('#check-button'); busy(button, true, 'Memeriksa…'); try { const data = await call('/api/otp/check', { providerConfig: state.config, token: state.order.token }); Object.assign(state.order, data); renderOrder(); addHistory(data.status); if (data.otp_code) message('Kode verifikasi berhasil diterima.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
-  $('#cancel-button').addEventListener('click', async () => { if (!state.order || !confirm('Batalkan order ini?')) return; const button = $('#cancel-button'); busy(button, true, 'Membatalkan…'); try { await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' }); state.order.status = 'CANCELLED'; renderOrder(); addHistory('CANCELLED'); message('Order berhasil dibatalkan.', 'success'); setTimeout(() => { state.order = null; renderOrder(); }, 1500); } catch (error) { message(error.message) } finally { busy(button, false) } })
-  $('#copy-button').addEventListener('click', async () => { if (!state.order) return; try { await navigator.clipboard.writeText(state.order.number); message('Nomor disalin ke clipboard.', 'success') } catch { message('Browser tidak mengizinkan clipboard.') } })
+
+  $('#order-button').addEventListener('click', async () => {
+    if (!state.config) return message('Hubungkan provider terlebih dahulu di Pengaturan.')
+    const serviceId = $('#service-select').value
+    if (!serviceId) return message('Silakan pilih layanan terlebih dahulu.')
+    const button = $('#order-button')
+    busy(button, true, 'Membuat order…')
+    try {
+      state.order = await call('/api/otp/order', { providerConfig: state.config, serviceId })
+      renderOrder()
+      addHistory('WAITING')
+      message('Order berhasil. Cek kode OTP.', 'success')
+
+      // Auto Shopee Check & Auto Cancel
+      const autoCancel = $('#auto-cancel-registered')?.checked ?? true
+      if (autoCancel && state.order && state.order.number) {
+        try {
+          const checkRes = await call('/api/shopee/check', { phone: state.order.number })
+          if (checkRes.registered) {
+            await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' })
+            state.order.status = 'CANCELLED'
+            renderOrder()
+            addHistory('CANCELLED')
+            message(`Nomor ${state.order.number} terdaftar Shopee — dibatalkan otomatis.`)
+            setTimeout(() => { state.order = null; renderOrder() }, 2000)
+          } else if (checkRes.available) {
+            message(`Nomor ${state.order.number} aman (belum terdaftar Shopee).`, 'success')
+          }
+        } catch (e) { /* ignore */ }
+      }
+    } catch (error) {
+      let msg = error.message
+      if (msg.includes('balance') || msg.includes('saldo') || msg.includes('insufficient') || msg.includes('money') || msg.includes('credit') || msg.includes('tidak mencukupi') || msg.includes('400')) {
+        msg = 'Saldo provider tidak mencukupi.'
+      }
+      message(msg)
+    } finally {
+      busy(button, false)
+    }
+  })
+
+  $('#check-button').addEventListener('click', async () => { if (!state.order) return; const button = $('#check-button'); busy(button, true, 'Cek…'); try { const data = await call('/api/otp/check', { providerConfig: state.config, token: state.order.token }); Object.assign(state.order, data); renderOrder(); addHistory(data.status); if (data.otp_code) message('Kode verifikasi diterima.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
+
+  $('#cancel-button').addEventListener('click', async () => {
+    if (!state.order) return
+    const yes = await showConfirm('Batalkan Order?', `Nomor ${state.order.number} akan dibatalkan.`)
+    if (!yes) return
+    const button = $('#cancel-button')
+    busy(button, true, 'Membatalkan…')
+    try {
+      await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' })
+      state.order.status = 'CANCELLED'
+      renderOrder()
+      addHistory('CANCELLED')
+      message('Order dibatalkan.', 'success')
+      setTimeout(() => { state.order = null; renderOrder() }, 1500)
+    } catch (error) { message(error.message) } finally { busy(button, false) }
+  })
+
+  $('#copy-button').addEventListener('click', async () => { if (!state.order) return; try { await navigator.clipboard.writeText(state.order.number); message('Nomor disalin.', 'success') } catch { message('Clipboard tidak tersedia.') } })
   $('#reveal-key').addEventListener('click', () => { const input = $('#api-key'); input.type = input.type === 'password' ? 'text' : 'password'; $('#reveal-key').textContent = input.type === 'password' ? 'Tampilkan' : 'Sembunyikan' })
   $('#auth-dropdown').addEventListener('selectionchange', () => { $('#header-field').hidden = $('#auth-mode').value !== 'x-api-key' })
   $('.nav-list').addEventListener('click', (event) => { const button = event.target.closest('.nav-link'); if (!button) return; document.querySelectorAll('.nav-link').forEach(x => x.classList.toggle('is-active', x === button)); const view = button.dataset.view; document.querySelectorAll('.view-panel').forEach(x => x.hidden = x.id !== `${view}-view`); $('#page-title').textContent = view === 'dashboard' ? 'Ringkasan aktivitas' : view === 'checker' ? 'Shopee Number Checker' : view === 'activity' ? 'Aktivitas terbaru' : 'Pengaturan tampilan' })
+
+  // Shopee Checker
   $('#run-check-button').addEventListener('click', async () => {
-    const input = $('#check-phone-input');
-    const phone = input.value.trim();
-    if (!phone) return message('Masukkan nomor telepon terlebih dahulu.');
-    input.value = '';
-    const button = $('#run-check-button');
-    busy(button, true, 'Memeriksa…');
+    const input = $('#check-phone-input')
+    const phone = input.value.trim()
+    if (!phone) return message('Masukkan nomor telepon.')
+    input.value = ''
+    const button = $('#run-check-button')
+    busy(button, true, 'Memeriksa…')
     try {
-      const res = await call('/api/shopee/check', { phone });
-      const box = $('#checker-result-box');
-      const isReg = res.registered;
-      const isAvail = res.available;
-      
-      box.className = 'active-order-box';
+      const res = await call('/api/shopee/check', { phone })
+      const box = $('#checker-result-box')
+      const isReg = res.registered
+      const isAvail = res.available
+      box.className = 'active-order-box'
       box.innerHTML = `
         <div class="order-status-badge">
           <span class="status-pill ${isReg ? 'is-failed' : isAvail ? 'is-success' : 'is-waiting'}">${res.status_text}</span>
           <h3>Status Shopee</h3>
         </div>
         <div class="order-phone-display">
-          <span class="label">Nomor Dicheck</span>
-          <div class="phone-row">
-            <strong>${res.phone}</strong>
-          </div>
+          <span class="label">Nomor</span>
+          <div class="phone-row"><strong>${res.phone}</strong></div>
         </div>
         <div class="otp-result-box">
-          <span class="label">Keterangan Shopee</span>
-          <div class="otp-code-wrapper" style="font-size:16px;">
-            ${isReg ? '❌ NOMOR SUDAH TERDAFTAR SHOPEE' : isAvail ? '✅ NOMOR BELUM TERDAFTAR (SIAP PAKAI)' : '⚠️ TIDAK DAPAT DIVERIFIKASI / CAPTCHA'}
+          <span class="label">Keterangan</span>
+          <div class="otp-code-wrapper" style="font-size:14px;">
+            ${isReg ? '❌ SUDAH TERDAFTAR SHOPEE' : isAvail ? '✅ BELUM TERDAFTAR (SIAP PAKAI)' : '⚠️ TIDAK BISA DIVERIFIKASI'}
           </div>
-        </div>
-      `;
-      message(`Pengecekan nomor ${res.phone} selesai.`, 'success');
-    } catch (err) {
-      message(err.message);
-    } finally {
-      busy(button, false);
-    }
+        </div>`
+      message(`Cek ${res.phone} selesai.`, 'success')
+    } catch (err) { message(err.message) } finally { busy(button, false) }
   })
+
   $('#clear-history').addEventListener('click', () => { state.history = []; refreshMetrics(); renderHistory() })
   $('#notification-close').addEventListener('click', closeNotification)
   $('#notification-modal').addEventListener('click', (event) => { if (event.target.id === 'notification-modal') closeNotification() })
@@ -162,17 +281,11 @@
   $('#theme-toggle').addEventListener('click', () => { const current = document.documentElement.dataset.theme; setTheme(current === 'dark' ? 'light' : 'dark') })
   document.querySelectorAll('[data-theme-choice]').forEach(button => button.addEventListener('click', () => setTheme(button.dataset.themeChoice)))
   systemDark.addEventListener('change', () => { if (localStorage.getItem(themeKey) === 'system') setTheme('system') })
+
   const STORAGE_KEY = 'otp_provider_config'
-  
-  function saveStoredConfig(cfg) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)) } catch {}
-  }
-  function getStoredConfig() {
-    try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : null } catch { return null }
-  }
-  function removeStoredConfig() {
-    try { localStorage.removeItem(STORAGE_KEY) } catch {}
-  }
+  function saveStoredConfig(cfg) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)) } catch {} }
+  function getStoredConfig() { try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : null } catch { return null } }
+  function removeStoredConfig() { try { localStorage.removeItem(STORAGE_KEY) } catch {} }
 
   async function autoConnect(saved) {
     if (!saved || !saved.apiKey) return
@@ -182,22 +295,19 @@
     $('#revoke-button').hidden = false
 
     try {
-      const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: saved }), call('/api/otp/balance', { providerConfig: saved })]);
-      state.config = saved;
-      state.services = services.services;
-      const serviceInput = $('#service-select');
-      const serviceTrigger = $('#service-trigger');
-      const serviceOptions = $('#service-options');
-      serviceOptions.innerHTML = state.services.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join('');
-      serviceInput.disabled = !state.services.length;
-      serviceTrigger.disabled = !state.services.length;
-      $('#order-button').disabled = !state.services.length;
-      if (state.services.length) selectValue($('#service-dropdown'), state.services[0].id, state.services[0].name);
-      $('#balance-box').hidden = false;
-      $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available);
-      status(`${state.services.length} layanan aktif`, 'is-success');
+      const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: saved }), call('/api/otp/balance', { providerConfig: saved })])
+      state.config = saved
+      state.services = services.services
+      const searchInput = $('#service-search')
+      searchInput.disabled = !state.services.length
+      searchInput.placeholder = state.services.length ? `Cari di ${state.services.length} layanan...` : 'Tidak ada layanan'
+      renderServiceOptions()
+      $('#order-button').disabled = !state.services.length
+      $('#balance-box').hidden = false
+      $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available)
+      status(`${state.services.length} layanan aktif`, 'is-success')
     } catch (error) {
-      status('Tersimpan (Koneksi Gagal)', 'is-failed');
+      status('Tersimpan (Koneksi Gagal)', 'is-failed')
     }
   }
 
@@ -205,20 +315,23 @@
   const savedConfig = getStoredConfig()
   if (savedConfig) autoConnect(savedConfig)
 
-  $('#revoke-button').addEventListener('click', () => {
-    if (!confirm('Hapus API key dari penyimpanan lokal?')) return
+  $('#revoke-button').addEventListener('click', async () => {
+    const yes = await showConfirm('Hapus API Key?', 'API key akan dihapus dari browser ini.')
+    if (!yes) return
     removeStoredConfig()
     state.config = null
     state.services = []
     $('#api-key').value = ''
-    $('#service-select').disabled = true
-    $('#service-trigger').disabled = true
-    $('#service-label').textContent = 'Hubungkan provider di Pengaturan terlebih dahulu'
+    const searchInput = $('#service-search')
+    searchInput.disabled = true
+    searchInput.value = ''
+    searchInput.placeholder = 'Hubungkan provider di Pengaturan'
+    $('#service-select').value = ''
     $('#service-options').innerHTML = ''
     $('#order-button').disabled = true
     $('#balance-box').hidden = true
     $('#revoke-button').hidden = true
     status('Belum terhubung', '')
-    message('API Key telah terhapus / direvoke.', 'success')
+    message('API Key dihapus.', 'success')
   })
 })()
