@@ -26,7 +26,39 @@
   function renderHistory() { const body = $('#history-body'); if (!state.history.length) { body.innerHTML = '<tr><td colspan="4" class="empty-state">Belum ada aktivitas.</td></tr>'; return }; body.innerHTML = state.history.map(x => `<tr><td>${x.time}</td><td>${escapeHtml(x.service)}</td><td>${escapeHtml(x.number)}</td><td class="table-status">${x.status}</td></tr>`).join('') }
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char])) }
   function addHistory(statusValue) { if (!state.order) return; const entry = { time: new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()), service: $('#service-label').textContent || state.order.service_id, number: state.order.number, status: statusValue }; const current = state.history.findIndex(x => x.number === entry.number); if (current >= 0) state.history[current] = entry; else state.history.unshift(entry); state.history = state.history.slice(0, 30); refreshMetrics(); renderHistory() }
-  function renderOrder() { const order = state.order; $('#active-order').hidden = !order; if (!order) return; $('#order-service').textContent = $('#service-select').selectedOptions[0]?.text || `Layanan ${order.service_id}`; $('#order-number').textContent = order.number; $('#order-reference').textContent = String(order.order_id); $('#otp-code').textContent = order.otp_code || 'Belum tersedia'; const pill = $('#order-state'); pill.textContent = order.status; pill.className = `status-pill ${order.status === 'RECEIVED' ? 'is-success' : order.status === 'FAILED' || order.status === 'CANCELLED' ? 'is-failed' : 'is-waiting'}`; $('#check-button').disabled = order.status === 'CANCELLED'; $('#cancel-button').disabled = order.status === 'CANCELLED' || order.status === 'RECEIVED' }
+  function renderOrder() {
+    const order = state.order
+    const activeBox = $('#active-order-box')
+    const formBox = $('#order-form-container')
+    
+    if (!order) {
+      if (activeBox) activeBox.hidden = true
+      if (formBox) formBox.hidden = false
+      return
+    }
+
+    if (formBox) formBox.hidden = true
+    if (activeBox) activeBox.hidden = false
+
+    const selectedService = state.services.find(s => String(s.id) === String(order.service_id))
+    const serviceName = selectedService ? selectedService.name : `Layanan ${order.service_id}`
+
+    $('#order-service').textContent = serviceName
+    $('#order-number').textContent = order.number
+    $('#otp-code').textContent = order.otp_code || 'Belum tersedia'
+    
+    const pill = $('#order-state')
+    let stateText = order.status
+    if (order.status === 'WAITING') stateText = 'MENUNGGU OTP'
+    else if (order.status === 'RECEIVED') stateText = 'BERHASIL'
+    else if (order.status === 'CANCELLED' || order.status === 'FAILED') stateText = 'DIBATALKAN'
+    
+    pill.textContent = stateText
+    pill.className = `status-pill ${order.status === 'RECEIVED' ? 'is-success' : order.status === 'FAILED' || order.status === 'CANCELLED' ? 'is-failed' : 'is-waiting'}`
+    
+    $('#check-button').disabled = order.status === 'CANCELLED' || order.status === 'RECEIVED'
+    $('#cancel-button').disabled = order.status === 'CANCELLED' || order.status === 'RECEIVED'
+  }
   function busy(button, active, label) { if (active) { button.dataset.label = button.textContent; button.textContent = label; button.disabled = true } else { button.textContent = button.dataset.label; button.disabled = false } }
   function closeDropdowns() { document.querySelectorAll('.custom-select').forEach(dropdown => { dropdown.classList.remove('is-open'); dropdown.querySelector('.select-options').hidden = true; dropdown.querySelector('.select-trigger').setAttribute('aria-expanded', 'false') }) }
   function selectValue(dropdown, value, label) { const input = dropdown.querySelector('input'); input.value = value; dropdown.querySelector('.select-trigger span:first-child').textContent = label; dropdown.querySelectorAll('.select-option').forEach(option => { const selected = option.dataset.value === String(value); option.classList.toggle('is-selected', selected); option.setAttribute('aria-selected', String(selected)) }); closeDropdowns(); dropdown.dispatchEvent(new CustomEvent('selectionchange', { bubbles: true, detail: { value, label } })) }
@@ -37,7 +69,7 @@
   $('#connect-button').addEventListener('click', async () => { const button = $('#connect-button'); const connection = config(); if (!connection.apiKey) return message('Masukkan API key terlebih dahulu.'); busy(button, true, 'Menghubungkan…'); try { const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: connection }), call('/api/otp/balance', { providerConfig: connection })]); state.config = connection; state.services = services.services; const serviceInput = $('#service-select'); const serviceTrigger = $('#service-trigger'); const serviceOptions = $('#service-options'); serviceOptions.innerHTML = state.services.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join(''); serviceInput.disabled = !state.services.length; serviceTrigger.disabled = !state.services.length; if (state.services.length) selectValue($('#service-dropdown'), state.services[0].id, state.services[0].name); $('#balance-box').hidden = false; $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available); status(`${state.services.length} layanan aktif`, 'is-success'); message('Provider berhasil terhubung.', 'success') } catch (error) { status('Koneksi gagal', 'is-failed'); message(error.message) } finally { busy(button, false) } })
   $('#order-button').addEventListener('click', async () => { if (!state.config) return message('Hubungkan provider terlebih dahulu.'); const button = $('#order-button'); busy(button, true, 'Membuat order…'); try { state.order = await call('/api/otp/order', { providerConfig: state.config, serviceId: $('#service-select').value }); renderOrder(); addHistory('WAITING'); message('Order berhasil dibuat. Kode dapat diperiksa secara manual.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
   $('#check-button').addEventListener('click', async () => { if (!state.order) return; const button = $('#check-button'); busy(button, true, 'Memeriksa…'); try { const data = await call('/api/otp/check', { providerConfig: state.config, token: state.order.token }); Object.assign(state.order, data); renderOrder(); addHistory(data.status); if (data.otp_code) message('Kode verifikasi berhasil diterima.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
-  $('#cancel-button').addEventListener('click', async () => { if (!state.order || !confirm('Batalkan order ini?')) return; const button = $('#cancel-button'); busy(button, true, 'Membatalkan…'); try { await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' }); state.order.status = 'CANCELLED'; renderOrder(); addHistory('CANCELLED'); message('Order berhasil dibatalkan.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
+  $('#cancel-button').addEventListener('click', async () => { if (!state.order || !confirm('Batalkan order ini?')) return; const button = $('#cancel-button'); busy(button, true, 'Membatalkan…'); try { await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' }); state.order.status = 'CANCELLED'; renderOrder(); addHistory('CANCELLED'); message('Order berhasil dibatalkan.', 'success'); setTimeout(() => { state.order = null; renderOrder(); }, 1500); } catch (error) { message(error.message) } finally { busy(button, false) } })
   $('#copy-button').addEventListener('click', async () => { if (!state.order) return; try { await navigator.clipboard.writeText(state.order.number); message('Nomor disalin ke clipboard.', 'success') } catch { message('Browser tidak mengizinkan clipboard.') } })
   $('#reveal-key').addEventListener('click', () => { const input = $('#api-key'); input.type = input.type === 'password' ? 'text' : 'password'; $('#reveal-key').textContent = input.type === 'password' ? 'Tampilkan' : 'Sembunyikan' })
   $('#auth-dropdown').addEventListener('selectionchange', () => { $('#header-field').hidden = $('#auth-mode').value !== 'x-api-key' })
