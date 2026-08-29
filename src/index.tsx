@@ -138,6 +138,10 @@ app.post('/api/otp/action', async (c) => {
 // Contoh: https://shopee-proxy.username.workers.dev
 const SHOPEE_PROXY_URL = process.env.SHOPEE_PROXY_URL || ''
 
+// Telegram Bot Checker API URL (set di Vercel env: TELEGRAM_CHECKER_URL)
+// Contoh: https://your-domain.com (via Cloudflare Tunnel)
+const TELEGRAM_CHECKER_URL = process.env.TELEGRAM_CHECKER_URL || ''
+
 function shopeeHeaders() {
   return {
     'Accept': 'application/json, text/plain, */*',
@@ -211,7 +215,34 @@ app.post('/api/shopee/check', async (c) => {
     if (intl.startsWith('0')) intl = '62' + intl.slice(1)
     if (!intl.startsWith('62')) intl = '62' + intl
 
-    // Strategy 1: Try Cloudflare Worker proxy (IP CDN tidak diblokir Shopee)
+    // Strategy 1: Telegram Bot Checker (paling akurat, bypass semua anti-bot)
+    if (TELEGRAM_CHECKER_URL) {
+      try {
+        const tgRes = await fetch(`${TELEGRAM_CHECKER_URL}/check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: national }),
+          signal: AbortSignal.timeout(35000),
+        })
+        if (tgRes.ok) {
+          const tgData = await tgRes.json() as any
+          if (tgData?.success) {
+            return c.json({
+              success: true,
+              phone: tgData.phone || intl,
+              registered: tgData.registered,
+              available: tgData.available,
+              status_text: tgData.status_text,
+              detail: tgData.detail || '',
+              source: 'telegram_bot',
+              raw: tgData.raw,
+            })
+          }
+        }
+      } catch {}
+    }
+
+    // Strategy 2: Try Cloudflare Worker proxy (IP CDN tidak diblokir Shopee)
     if (SHOPEE_PROXY_URL) {
       try {
         const proxyRes = await fetch(SHOPEE_PROXY_URL, {
@@ -229,7 +260,7 @@ app.post('/api/shopee/check', async (c) => {
       } catch {}
     }
 
-    // Strategy 2: Direct check (mungkin berhasil dari IP tertentu)
+    // Strategy 3: Direct check (mungkin berhasil dari IP tertentu)
     const direct = await shopeeCheckDirect(national, intl)
     if (direct) {
       return c.json({
@@ -243,13 +274,13 @@ app.post('/api/shopee/check', async (c) => {
       })
     }
 
-    // Strategy 3: All failed - report as CAPTCHA/blocked
+    // Strategy 4: All failed - report as CAPTCHA/blocked
     return c.json({
       success: true,
       phone: intl,
       registered: false,
       available: false,
-      status_text: 'CAPTCHA / ANTI-BOT - Shopee memblokir server. Deploy Cloudflare Worker untuk fix.',
+      status_text: 'CAPTCHA / ANTI-BOT - Shopee memblokir server. Setup Telegram Checker untuk fix.',
       source: 'all_failed',
     })
   } catch (error) {
