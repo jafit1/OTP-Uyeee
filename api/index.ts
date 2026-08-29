@@ -1,5 +1,8 @@
 import { handle } from 'hono/vercel'
 import app from '../src/index'
 
-// Vercel routing sends dynamic requests to this Web-standard Hono handler.
+export const config = {
+  runtime: 'edge',
+}
+
 export default handle(app)
