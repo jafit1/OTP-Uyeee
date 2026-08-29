@@ -80,10 +80,8 @@
       message('Order berhasil dibuat. Kode OTP siap dicek.', 'success');
     } catch (error) {
       let msg = error.message;
-      if (msg.includes('balance') || msg.includes('saldo') || msg.includes('insufficient') || msg.includes('money') || msg.includes('credit')) {
-        msg = 'Saldo provider Anda tidak mencukupi untuk membuat order ini.';
-      } else if (msg.includes('missing service_id')) {
-        msg = 'Layanan belum dipilih atau ID layanan tidak valid.';
+      if (msg.includes('balance') || msg.includes('saldo') || msg.includes('insufficient') || msg.includes('money') || msg.includes('credit') || msg.includes('tidak mencukupi') || msg.includes('400')) {
+        msg = 'Saldo provider Anda tidak mencukupi atau transaksi ditolak oleh provider.';
       }
       message(msg);
     } finally {

@@ -97,10 +97,16 @@ app.post('/api/otp/order', async (c) => {
   try {
     const body = await c.req.json<{ providerConfig?: ProviderConfig; serviceId?: string }>()
     if (!body.serviceId) return c.json({ success: false, error: 'Pilih layanan sebelum membuat order.' }, 400)
-    const raw = await requestProvider(providerConfig(body.providerConfig), DEFAULT_ENDPOINTS.order, { method: 'POST', body: JSON.stringify({ service_id: body.serviceId }) })
-    const token = String(raw.token || '')
+    
+    // Support numeric service_id if applicable or keep string
+    const service_id = isNaN(Number(body.serviceId)) ? body.serviceId : Number(body.serviceId)
+    const raw = await requestProvider(providerConfig(body.providerConfig), DEFAULT_ENDPOINTS.order, { 
+      method: 'POST', 
+      body: JSON.stringify({ service_id, service: service_id }) 
+    })
+    const token = String(raw.token || raw.id || '')
     const number = String(raw.phone || raw.number || '')
-    if (!token || !number) throw new Error('Respons provider tidak lengkap: token atau nomor tidak ditemukan.')
+    if (!token || !number) throw new Error(String(raw.message || raw.error || 'Respons provider tidak lengkap: token atau nomor tidak ditemukan.'))
     return c.json({ success: true, token, order_id: raw.order_id || token, number, service_id: body.serviceId, status: 'WAITING', expires_at: raw.expires_at || null })
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
