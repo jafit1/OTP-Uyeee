@@ -137,36 +137,58 @@ app.post('/api/otp/action', async (c) => {
 app.post('/api/shopee/check', async (c) => {
   try {
     const body = await c.req.json<{ phone?: string }>()
-    let phone = String(body.phone || '').trim().replace(/[^0-9]/g, '')
-    if (!phone) return c.json({ success: false, error: 'Nomor telepon tidak boleh kosong.' }, 400)
+    let rawPhone = String(body.phone || '').trim().replace(/[^0-9]/g, '')
+    if (!rawPhone) return c.json({ success: false, error: 'Nomor telepon tidak boleh kosong.' }, 400)
 
-    if (phone.startsWith('0')) phone = '62' + phone.slice(1)
-    if (!phone.startsWith('62')) phone = '62' + phone
+    let national = rawPhone
+    if (national.startsWith('62')) national = '0' + national.slice(2)
 
-    const res = await fetch('https://shopee.co.id/api/v4/account/check_phone_number_registered', {
+    let intl = rawPhone
+    if (intl.startsWith('0')) intl = '62' + intl.slice(1)
+    if (!intl.startsWith('62')) intl = '62' + intl
+
+    const commonHeaders = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'Android app Shopee com.shopee.id v2.90.10',
+      'X-Shopee-Language': 'id',
+      'X-Requested-With': 'com.shopee.id',
+      'Client-Id': '10001',
+    }
+
+    // Try primary V4 API
+    let res = await fetch('https://shopee.co.id/api/v4/account/basic/get_account_info_by_phone', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-        'X-Shopee-Language': 'id',
-        'Referer': 'https://shopee.co.id/buyer/login',
-      },
-      body: JSON.stringify({ phone_number: phone })
-    })
+      headers: commonHeaders,
+      body: JSON.stringify({ phone: national, phone_number: intl })
+    }).catch(() => null)
 
-    const text = await res.text()
     let data: any = {}
-    try { data = JSON.parse(text) } catch {}
+    if (res && res.ok) {
+      try { data = await res.json() } catch {}
+    }
 
-    const registered = data?.data?.is_registered === true || data?.is_registered === true
-    const available = !registered && (data?.error === 0 || data?.data?.is_registered === false)
+    // Fallback V2 login check
+    if (!data?.data && !data?.is_registered) {
+      const res2 = await fetch('https://shopee.co.id/api/v2/authentication/check_phone_number', {
+        method: 'POST',
+        headers: commonHeaders,
+        body: JSON.stringify({ phone: intl })
+      }).catch(() => null)
+      if (res2 && res2.ok) {
+        try { data = await res2.json() } catch {}
+      }
+    }
+
+    const isReg = data?.data?.is_registered === true || data?.is_registered === true || data?.data?.exist === true || data?.exist === true || data?.error === 10001
+    const isAvail = data?.data?.is_registered === false || data?.is_registered === false || data?.data?.exist === false || data?.exist === false || (data?.error === 0 && !isReg)
 
     return c.json({
       success: true,
-      phone,
-      registered: !!registered,
-      available: !!available,
-      status_text: registered ? 'TERDAFTAR (UNAVAILABLE)' : available ? 'BELUM TERDAFTAR (AVAILABLE)' : 'STATUS UNKNOWN / CAPTCHA',
+      phone: intl,
+      registered: !!isReg,
+      available: !!isAvail,
+      status_text: isReg ? 'TERDAFTAR (UNAVAILABLE)' : isAvail ? 'BELUM TERDAFTAR (AVAILABLE)' : 'CAPTCHA / ANTI-BOT DETECTED',
       raw: data
     })
   } catch (error) {
