@@ -120,6 +120,7 @@
     const input = $('#check-phone-input');
     const phone = input.value.trim();
     if (!phone) return message('Masukkan nomor telepon terlebih dahulu.');
+    input.value = '';
     const button = $('#run-check-button');
     busy(button, true, 'Memeriksa…');
     try {
