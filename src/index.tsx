@@ -309,7 +309,7 @@ app.get('/', (c) => c.render(
               <label class="field-label" for="service-search">Daftar Layanan Tersedia</label>
               <div id="service-dropdown" class="custom-select">
                 <input id="service-select" type="hidden" disabled />
-                <input id="service-search" class="select-trigger" type="text" placeholder="Ketik untuk cari layanan..." disabled autocomplete="off" />
+                <input id="service-search" class="select-trigger" type="text" placeholder="Ketik untuk cari layanan..." disabled autocomplete="off" data-lpignore="true" data-1p-ignore="true" />
                 <div id="service-options" class="select-options" role="listbox" hidden></div>
               </div>
               <button id="order-button" class="button button-primary" type="button" disabled>Minta Nomor Baru</button>
@@ -359,7 +359,7 @@ app.get('/', (c) => c.render(
             
             <label class="field-label" for="check-phone-input">Nomor Telepon (Cek Manual)</label>
             <div class="input-row">
-              <input id="check-phone-input" type="text" placeholder="Contoh: 08123456789 atau 628123456789" autocomplete="off" />
+              <input id="check-phone-input" type="text" placeholder="Contoh: 08123456789 atau 628123456789" autocomplete="off" data-lpignore="true" data-1p-ignore="true" />
               <button id="run-check-button" class="button button-primary" type="button" style="margin-top:0; width:auto; min-width:110px;">Cek Nomor</button>
             </div>
 
@@ -386,12 +386,12 @@ app.get('/', (c) => c.render(
           <div class="panel-heading"><div><p class="eyebrow">KONEKSI PROVIDER</p><h2>Hubungkan API Key</h2></div><span class="step">🔑</span></div>
           <p class="muted">Masukkan API key provider untuk mengaktifkan layanan dan saldo. Key hanya disimpan di memori sesi browser.</p>
           <label class="field-label" for="api-key">API key provider</label>
-          <div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="Masukkan API key"/><button id="reveal-key" class="text-button" type="button">Tampilkan</button></div>
+          <div class="input-row"><input id="api-key" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="Masukkan API key"/><button id="reveal-key" class="text-button" type="button">Tampilkan</button></div>
           <div class="field-grid">
             <label class="field-label">Metode autentikasi
               <div id="auth-dropdown" class="custom-select"><input id="auth-mode" type="hidden" value="bearer" /><button id="auth-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="auth-label">Bearer token</span><span class="select-chevron">⌄</span></button><div id="auth-options" class="select-options" role="listbox" hidden><button class="select-option is-selected" type="button" role="option" aria-selected="true" data-value="bearer">Bearer token</button><button class="select-option" type="button" role="option" aria-selected="false" data-value="x-api-key">x-api-key header</button></div></div>
             </label>
-            <label id="header-field" class="field-label">Nama header<input id="header-name" value="x-api-key" /></label>
+            <label id="header-field" class="field-label">Nama header<input id="header-name" value="x-api-key" autocomplete="off" data-lpignore="true" data-1p-ignore="true" /></label>
           </div>
           <div class="button-group" style="margin-top: 15px;">
             <button id="connect-button" class="button button-primary" type="button" style="flex: 1;">Uji & Simpan Provider</button>

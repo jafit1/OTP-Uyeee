@@ -190,9 +190,13 @@
       addHistory('WAITING')
       message('Order berhasil. Cek kode OTP.', 'success')
 
-      // Auto Shopee Check & Auto Cancel
+      // Auto Shopee Check & Auto Cancel (Hanya untuk layanan Shopee)
+      const selectedService = state.services.find(s => String(s.id) === String(serviceId))
+      const serviceName = (selectedService ? selectedService.name : '').toLowerCase()
+      const isShopee = serviceName.includes('shopee')
+      
       const autoCancel = $('#auto-cancel-registered')?.checked ?? true
-      if (autoCancel && state.order && state.order.number) {
+      if (isShopee && autoCancel && state.order && state.order.number) {
         try {
           const checkRes = await call('/api/shopee/check', { phone: state.order.number })
           if (checkRes.registered) {
