@@ -2,20 +2,23 @@
   "name": "otp-uyeee",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "wrangler pages dev dist",
+    "dev:sandbox": "wrangler pages dev dist --ip 0.0.0.0 --port 3000",
+    "deploy": "npm run build && wrangler pages deploy dist",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
   },
   "dependencies": {
-    "next": "14.2.5",
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "hono": "^4.13.5"
   },
   "devDependencies": {
-    "autoprefixer": "10.4.20",
-    "postcss": "8.4.45",
-    "tailwindcss": "3.4.10"
+    "@hono/vite-build": "^1.11.1",
+    "@hono/vite-dev-server": "^0.26.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.4",
+    "wrangler": "^4.110.0"
   }
 }
