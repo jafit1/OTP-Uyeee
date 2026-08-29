@@ -209,7 +209,10 @@ app.get('/', (c) => c.render(
             </label>
             <label id="header-field" class="field-label">Nama header<input id="header-name" value="x-api-key" /></label>
           </div>
-          <button id="connect-button" class="button button-primary" type="button" style="margin-top: 15px;">Uji & Hubungkan Provider</button>
+          <div class="button-group" style="margin-top: 15px;">
+            <button id="connect-button" class="button button-primary" type="button" style="flex: 1;">Uji & Simpan Provider</button>
+            <button id="revoke-button" class="button button-danger" type="button" style="flex: 0 0 auto; width: auto;" hidden>Hapus / Revoke Key</button>
+          </div>
         </section>
 
         <section class="panel settings-card">

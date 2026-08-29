@@ -66,7 +66,7 @@
   document.querySelectorAll('.custom-select').forEach(setupDropdown)
   document.addEventListener('click', (event) => { if (!event.target.closest('.custom-select')) closeDropdowns() })
 
-  $('#connect-button').addEventListener('click', async () => { const button = $('#connect-button'); const connection = config(); if (!connection.apiKey) return message('Masukkan API key terlebih dahulu.'); busy(button, true, 'Menghubungkan…'); try { const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: connection }), call('/api/otp/balance', { providerConfig: connection })]); state.config = connection; state.services = services.services; const serviceInput = $('#service-select'); const serviceTrigger = $('#service-trigger'); const serviceOptions = $('#service-options'); serviceOptions.innerHTML = state.services.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join(''); serviceInput.disabled = !state.services.length; serviceTrigger.disabled = !state.services.length; if (state.services.length) selectValue($('#service-dropdown'), state.services[0].id, state.services[0].name); $('#balance-box').hidden = false; $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available); status(`${state.services.length} layanan aktif`, 'is-success'); message('Provider berhasil terhubung.', 'success') } catch (error) { status('Koneksi gagal', 'is-failed'); message(error.message) } finally { busy(button, false) } })
+  $('#connect-button').addEventListener('click', async () => { const button = $('#connect-button'); const connection = config(); if (!connection.apiKey) return message('Masukkan API key terlebih dahulu.'); busy(button, true, 'Menghubungkan…'); try { const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: connection }), call('/api/otp/balance', { providerConfig: connection })]); state.config = connection; state.services = services.services; saveStoredConfig(connection); $('#revoke-button').hidden = false; const serviceInput = $('#service-select'); const serviceTrigger = $('#service-trigger'); const serviceOptions = $('#service-options'); serviceOptions.innerHTML = state.services.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join(''); serviceInput.disabled = !state.services.length; serviceTrigger.disabled = !state.services.length; $('#order-button').disabled = !state.services.length; if (state.services.length) selectValue($('#service-dropdown'), state.services[0].id, state.services[0].name); $('#balance-box').hidden = false; $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available); status(`${state.services.length} layanan aktif`, 'is-success'); message('Provider & API Key berhasil tersimpan.', 'success') } catch (error) { status('Koneksi gagal', 'is-failed'); message(error.message) } finally { busy(button, false) } })
   $('#order-button').addEventListener('click', async () => { if (!state.config) return message('Hubungkan provider terlebih dahulu.'); const button = $('#order-button'); busy(button, true, 'Membuat order…'); try { state.order = await call('/api/otp/order', { providerConfig: state.config, serviceId: $('#service-select').value }); renderOrder(); addHistory('WAITING'); message('Order berhasil dibuat. Kode dapat diperiksa secara manual.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
   $('#check-button').addEventListener('click', async () => { if (!state.order) return; const button = $('#check-button'); busy(button, true, 'Memeriksa…'); try { const data = await call('/api/otp/check', { providerConfig: state.config, token: state.order.token }); Object.assign(state.order, data); renderOrder(); addHistory(data.status); if (data.otp_code) message('Kode verifikasi berhasil diterima.', 'success') } catch (error) { message(error.message) } finally { busy(button, false) } })
   $('#cancel-button').addEventListener('click', async () => { if (!state.order || !confirm('Batalkan order ini?')) return; const button = $('#cancel-button'); busy(button, true, 'Membatalkan…'); try { await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' }); state.order.status = 'CANCELLED'; renderOrder(); addHistory('CANCELLED'); message('Order berhasil dibatalkan.', 'success'); setTimeout(() => { state.order = null; renderOrder(); }, 1500); } catch (error) { message(error.message) } finally { busy(button, false) } })
@@ -81,5 +81,63 @@
   $('#theme-toggle').addEventListener('click', () => { const current = document.documentElement.dataset.theme; setTheme(current === 'dark' ? 'light' : 'dark') })
   document.querySelectorAll('[data-theme-choice]').forEach(button => button.addEventListener('click', () => setTheme(button.dataset.themeChoice)))
   systemDark.addEventListener('change', () => { if (localStorage.getItem(themeKey) === 'system') setTheme('system') })
+  const STORAGE_KEY = 'otp_provider_config'
+  
+  function saveStoredConfig(cfg) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)) } catch {}
+  }
+  function getStoredConfig() {
+    try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : null } catch { return null }
+  }
+  function removeStoredConfig() {
+    try { localStorage.removeItem(STORAGE_KEY) } catch {}
+  }
+
+  async function autoConnect(saved) {
+    if (!saved || !saved.apiKey) return
+    $('#api-key').value = saved.apiKey
+    if (saved.authMode) selectValue($('#auth-dropdown'), saved.authMode, saved.authMode === 'x-api-key' ? 'x-api-key header' : 'Bearer token')
+    if (saved.apiKeyHeader) $('#header-name').value = saved.apiKeyHeader
+    $('#revoke-button').hidden = false
+
+    try {
+      const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: saved }), call('/api/otp/balance', { providerConfig: saved })]);
+      state.config = saved;
+      state.services = services.services;
+      const serviceInput = $('#service-select');
+      const serviceTrigger = $('#service-trigger');
+      const serviceOptions = $('#service-options');
+      serviceOptions.innerHTML = state.services.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join('');
+      serviceInput.disabled = !state.services.length;
+      serviceTrigger.disabled = !state.services.length;
+      $('#order-button').disabled = !state.services.length;
+      if (state.services.length) selectValue($('#service-dropdown'), state.services[0].id, state.services[0].name);
+      $('#balance-box').hidden = false;
+      $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available);
+      status(`${state.services.length} layanan aktif`, 'is-success');
+    } catch (error) {
+      status('Tersimpan (Koneksi Gagal)', 'is-failed');
+    }
+  }
+
   $('#header-field').hidden = true; setTheme(); refreshMetrics(); renderHistory()
+  const savedConfig = getStoredConfig()
+  if (savedConfig) autoConnect(savedConfig)
+
+  $('#revoke-button').addEventListener('click', () => {
+    if (!confirm('Hapus API key dari penyimpanan lokal?')) return
+    removeStoredConfig()
+    state.config = null
+    state.services = []
+    $('#api-key').value = ''
+    $('#service-select').disabled = true
+    $('#service-trigger').disabled = true
+    $('#service-label').textContent = 'Hubungkan provider di Pengaturan terlebih dahulu'
+    $('#service-options').innerHTML = ''
+    $('#order-button').disabled = true
+    $('#balance-box').hidden = true
+    $('#revoke-button').hidden = true
+    status('Belum terhubung', '')
+    message('API Key telah terhapus / direvoke.', 'success')
+  })
 })()
