@@ -60,7 +60,13 @@
 .select-option { display: block; width: 100%; padding: 8px 12px; border: 0; background: transparent; color: var(--text); font-size: 12px; text-align: left; cursor: pointer; }
 .select-option:hover, .select-option.is-selected { background: var(--surface-soft); color: var(--brand); font-weight: 700; }
 
-.active-order-box { margin-top: 14px; display: grid; gap: 14px; }
+.balance-box-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 20px; font-size: 11px; color: var(--muted); }
+.balance-box-pill strong { color: var(--success); font-family: 'DM Mono', monospace; font-size: 12px; }
+.placeholder-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+.placeholder-icon { font-size: 42px; display: block; margin-bottom: 12px; }
+.placeholder-state p { font-size: 13px; line-height: 1.5; margin: 0; }
+.input-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
 .order-status-badge { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .order-phone-display, .otp-result-box { background: var(--surface-soft); padding: 12px; border-radius: 8px; border: 1px solid var(--line); }
 .order-phone-display .label, .otp-result-box .label { display: block; font-size: 10px; color: var(--muted); font-weight: 800; margin-bottom: 4px; text-transform: uppercase; }

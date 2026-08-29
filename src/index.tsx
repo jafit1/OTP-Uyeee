@@ -144,12 +144,89 @@ app.get('/', (c) => c.render(
       <div id="notification-modal" class="notification-modal" role="presentation" hidden><section class="notification-card" role="alertdialog" aria-modal="true" aria-labelledby="notification-title"><span id="notification-icon" class="notification-icon">!</span><div><p id="notification-title" class="notification-title">Pemberitahuan</p><p id="notification-text" class="notification-text"></p></div><button id="notification-close" class="notification-close" type="button" aria-label="Tutup notifikasi">×</button></section></div>
       <section id="dashboard-view" class="view-panel">
         <section class="metrics" aria-label="Statistik order"><article class="metric-card"><span>Total order</span><strong id="metric-total">0</strong><small>Dalam sesi ini</small></article><article class="metric-card"><span>Berhasil</span><strong id="metric-success">0</strong><small>Kode telah diterima</small></article><article class="metric-card"><span>Menunggu</span><strong id="metric-waiting">0</strong><small>Perlu ditindaklanjuti</small></article></section>
-        <div class="content-grid"><section class="panel connection-panel"><div class="panel-heading"><div><p class="eyebrow">KONEKSI</p><h2>Hubungkan provider</h2></div><span class="step">01</span></div><p class="muted">Masukkan API key untuk memuat layanan dan saldo. Key hanya disimpan selama tab browser ini terbuka.</p><label class="field-label" for="api-key">API key provider</label><div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="Masukkan API key"/><button id="reveal-key" class="text-button" type="button">Tampilkan</button></div><div class="field-grid"><label class="field-label">Metode autentikasi<div id="auth-dropdown" class="custom-select"><input id="auth-mode" type="hidden" value="bearer" /><button id="auth-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="auth-label">Bearer token</span><span class="select-chevron">⌄</span></button><div id="auth-options" class="select-options" role="listbox" hidden><button class="select-option is-selected" type="button" role="option" aria-selected="true" data-value="bearer">Bearer token</button><button class="select-option" type="button" role="option" aria-selected="false" data-value="x-api-key">x-api-key header</button></div></div></label><label id="header-field" class="field-label">Nama header<input id="header-name" value="x-api-key" /></label></div><button id="connect-button" class="button button-primary" type="button">Uji & hubungkan</button></section>
-        <section class="panel order-panel"><div class="panel-heading"><div><p class="eyebrow">ORDER BARU</p><h2>Minta nomor verifikasi</h2></div><span class="step">02</span></div><p class="muted">Pilih layanan setelah koneksi berhasil diverifikasi.</p><div id="order-form-container"><label class="field-label" for="service-select">Layanan</label><div id="service-dropdown" class="custom-select"><input id="service-select" type="hidden" disabled /><button id="service-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" disabled><span id="service-label">Hubungkan provider terlebih dahulu</span><span class="select-chevron">⌄</span></button><div id="service-options" class="select-options" role="listbox" hidden></div></div><button id="order-button" class="button button-primary" type="button" disabled>Buat order</button></div><div id="active-order-box" class="active-order-box" hidden><div class="order-status-badge"><span id="order-state" class="status-pill is-waiting">MENUNGGU OTP</span><h3 id="order-service">Layanan</h3></div><div class="order-phone-display"><span class="label">Nomor Telepon</span><div class="phone-row"><strong id="order-number">—</strong><button id="copy-button" class="icon-action-btn" type="button" title="Salin nomor">📋</button></div></div><div class="otp-result-box"><span class="label">Kode OTP / SMS</span><div class="otp-code-wrapper"><strong id="otp-code">Belum tersedia</strong></div></div><div class="order-actions-grid"><button id="check-button" class="button button-primary" type="button">🔄 Cek Kode OTP</button><button id="cancel-button" class="button button-danger" type="button">❌ Batalkan Order</button></div></div><div id="balance-box" class="balance-box" hidden><span>Saldo tersedia</span><strong id="balance-value">—</strong></div></section></div>
-        <section id="active-order" class="panel active-order" hidden></section>
+        <div class="content-grid">
+          <section class="panel order-panel">
+            <div class="panel-heading"><div><p class="eyebrow">ORDER LAYANAN</p><h2>Pilih Layanan</h2></div><div id="balance-box" class="balance-box-pill" hidden><span>Saldo:</span> <strong id="balance-value">—</strong></div></div>
+            <p class="muted">Pilih aplikasi/layanan yang ingin Anda dapatkan nomor OTP-nya.</p>
+            <div id="order-form-container">
+              <label class="field-label" for="service-select">Daftar Layanan Tersedia</label>
+              <div id="service-dropdown" class="custom-select">
+                <input id="service-select" type="hidden" disabled />
+                <button id="service-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" disabled>
+                  <span id="service-label">Hubungkan provider di Pengaturan terlebih dahulu</span>
+                  <span class="select-chevron">⌄</span>
+                </button>
+                <div id="service-options" class="select-options" role="listbox" hidden></div>
+              </div>
+              <button id="order-button" class="button button-primary" type="button" disabled>Minta Nomor Baru</button>
+            </div>
+          </section>
+
+          <section class="panel active-order-panel">
+            <div class="panel-heading"><div><p class="eyebrow">MONITOR OTP</p><h2>Status & Kode OTP</h2></div></div>
+            <div id="active-order-box" class="active-order-box">
+              <div id="no-order-placeholder" class="placeholder-state">
+                <span class="placeholder-icon">📱</span>
+                <p>Belum ada order aktif. Silakan pilih layanan di sebelah kiri untuk meminta nomor.</p>
+              </div>
+              <div id="order-details-content" hidden>
+                <div class="order-status-badge">
+                  <span id="order-state" class="status-pill is-waiting">MENUNGGU OTP</span>
+                  <h3 id="order-service">Layanan</h3>
+                </div>
+                <div class="order-phone-display">
+                  <span class="label">Nomor Telepon</span>
+                  <div class="phone-row">
+                    <strong id="order-number">—</strong>
+                    <button id="copy-button" class="icon-action-btn" type="button" title="Salin nomor">📋 Salin</button>
+                  </div>
+                </div>
+                <div class="otp-result-box">
+                  <span class="label">Kode OTP Received</span>
+                  <div class="otp-code-wrapper">
+                    <strong id="otp-code">Belum tersedia</strong>
+                  </div>
+                </div>
+                <div class="order-actions-grid">
+                  <button id="check-button" class="button button-primary" type="button">🔄 Cek Kode OTP</button>
+                  <button id="cancel-button" class="button button-danger" type="button">❌ Batalkan Order</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
       </section>
       <section id="activity-view" class="view-panel" hidden><section class="panel"><div class="panel-heading"><div><p class="eyebrow">RIWAYAT SESI</p><h2>Aktivitas terbaru</h2></div><button id="clear-history" class="text-button" type="button">Bersihkan</button></div><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Layanan</th><th>Nomor</th><th>Status</th></tr></thead><tbody id="history-body"><tr><td colspan={4} class="empty-state">Belum ada aktivitas.</td></tr></tbody></table></div></section></section>
-      <section id="settings-view" class="view-panel" hidden><section class="panel settings-card"><p class="eyebrow">PREFERENSI</p><h2>Tampilan dan keamanan</h2><p class="muted">Pilih tema yang nyaman. Preferensi tema disimpan di browser Anda.</p><div class="theme-options"><button class="theme-choice" data-theme-choice="light" type="button">☀ Terang</button><button class="theme-choice" data-theme-choice="dark" type="button">☾ Gelap</button><button class="theme-choice" data-theme-choice="system" type="button">◐ Ikuti sistem</button><button class="theme-choice" data-theme-choice="google" type="button">G Google</button><button class="theme-choice" data-theme-choice="ocean" type="button">◈ Ocean</button><button class="theme-choice" data-theme-choice="forest" type="button">♣ Forest</button><button class="theme-choice" data-theme-choice="sunset" type="button">☼ Sunset</button><button class="theme-choice" data-theme-choice="midnight" type="button">✦ Midnight</button></div><hr/><h3>Privasi sesi</h3><p class="muted">API key tidak disimpan ke local storage atau database. Menutup tab akan menghapus kredensial sesi.</p></section></section>
+      <section id="settings-view" class="view-panel" hidden>
+        <section class="panel connection-panel" style="margin-bottom: 20px;">
+          <div class="panel-heading"><div><p class="eyebrow">KONEKSI PROVIDER</p><h2>Hubungkan API Key</h2></div><span class="step">🔑</span></div>
+          <p class="muted">Masukkan API key provider untuk mengaktifkan layanan dan saldo. Key hanya disimpan di memori sesi browser.</p>
+          <label class="field-label" for="api-key">API key provider</label>
+          <div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="Masukkan API key"/><button id="reveal-key" class="text-button" type="button">Tampilkan</button></div>
+          <div class="field-grid">
+            <label class="field-label">Metode autentikasi
+              <div id="auth-dropdown" class="custom-select"><input id="auth-mode" type="hidden" value="bearer" /><button id="auth-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="auth-label">Bearer token</span><span class="select-chevron">⌄</span></button><div id="auth-options" class="select-options" role="listbox" hidden><button class="select-option is-selected" type="button" role="option" aria-selected="true" data-value="bearer">Bearer token</button><button class="select-option" type="button" role="option" aria-selected="false" data-value="x-api-key">x-api-key header</button></div></div>
+            </label>
+            <label id="header-field" class="field-label">Nama header<input id="header-name" value="x-api-key" /></label>
+          </div>
+          <button id="connect-button" class="button button-primary" type="button" style="margin-top: 15px;">Uji & Hubungkan Provider</button>
+        </section>
+
+        <section class="panel settings-card">
+          <p class="eyebrow">PREFERENSI TAMPILAN</p><h2>Tema Aplikasi</h2>
+          <p class="muted">Pilih tema visual yang Anda sukai. Preferensi disimpan secara otomatis.</p>
+          <div class="theme-options">
+            <button class="theme-choice" data-theme-choice="light" type="button">☀ Terang</button>
+            <button class="theme-choice" data-theme-choice="dark" type="button">☾ Gelap</button>
+            <button class="theme-choice" data-theme-choice="system" type="button">◐ Ikuti sistem</button>
+            <button class="theme-choice" data-theme-choice="google" type="button">G Google</button>
+            <button class="theme-choice" data-theme-choice="ocean" type="button">◈ Ocean</button>
+            <button class="theme-choice" data-theme-choice="forest" type="button">♣ Forest</button>
+            <button class="theme-choice" data-theme-choice="sunset" type="button">☼ Sunset</button>
+            <button class="theme-choice" data-theme-choice="midnight" type="button">✦ Midnight</button>
+          </div>
+        </section>
+      </section>
     </section>
     <script src="/static/app.js" defer></script>
   </main>

@@ -28,17 +28,17 @@
   function addHistory(statusValue) { if (!state.order) return; const entry = { time: new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()), service: $('#service-label').textContent || state.order.service_id, number: state.order.number, status: statusValue }; const current = state.history.findIndex(x => x.number === entry.number); if (current >= 0) state.history[current] = entry; else state.history.unshift(entry); state.history = state.history.slice(0, 30); refreshMetrics(); renderHistory() }
   function renderOrder() {
     const order = state.order
-    const activeBox = $('#active-order-box')
-    const formBox = $('#order-form-container')
+    const detailsContent = $('#order-details-content')
+    const placeholder = $('#no-order-placeholder')
     
     if (!order) {
-      if (activeBox) activeBox.hidden = true
-      if (formBox) formBox.hidden = false
+      if (detailsContent) detailsContent.hidden = true
+      if (placeholder) placeholder.hidden = false
       return
     }
 
-    if (formBox) formBox.hidden = true
-    if (activeBox) activeBox.hidden = false
+    if (placeholder) placeholder.hidden = true
+    if (detailsContent) detailsContent.hidden = false
 
     const selectedService = state.services.find(s => String(s.id) === String(order.service_id))
     const serviceName = selectedService ? selectedService.name : `Layanan ${order.service_id}`
