@@ -78,6 +78,28 @@
       renderOrder();
       addHistory('WAITING');
       message('Order berhasil dibuat. Kode OTP siap dicek.', 'success');
+
+      // Auto Shopee Check & Auto Cancel if enabled
+      const autoCancel = $('#auto-cancel-registered')?.checked ?? true;
+      if (autoCancel && state.order && state.order.number) {
+        message('Memeriksa pendaftaran Shopee untuk nomor baru…', 'success');
+        try {
+          const checkRes = await call('/api/shopee/check', { phone: state.order.number });
+          if (checkRes.registered) {
+            message(`Nomor ${state.order.number} TERDAFTAR di Shopee! Membatalkan order otomatis...`);
+            await call('/api/otp/action', { providerConfig: state.config, orderRef: state.order.order_id, action: 'cancel' });
+            state.order.status = 'CANCELLED';
+            renderOrder();
+            addHistory('CANCELLED');
+            message(`Nomor ${state.order.number} sudah terdaftar Shopee & berhasil dibatalkan otomatis!`);
+            setTimeout(() => { state.order = null; renderOrder(); }, 2000);
+          } else if (checkRes.available) {
+            message(`Nomor ${state.order.number} BELUM TERDAFTAR di Shopee! Silakan lanjutkan.`, 'success');
+          }
+        } catch (e) {
+          // ignore auto check error
+        }
+      }
     } catch (error) {
       let msg = error.message;
       if (msg.includes('balance') || msg.includes('saldo') || msg.includes('insufficient') || msg.includes('money') || msg.includes('credit') || msg.includes('tidak mencukupi') || msg.includes('400')) {
@@ -93,7 +115,45 @@
   $('#copy-button').addEventListener('click', async () => { if (!state.order) return; try { await navigator.clipboard.writeText(state.order.number); message('Nomor disalin ke clipboard.', 'success') } catch { message('Browser tidak mengizinkan clipboard.') } })
   $('#reveal-key').addEventListener('click', () => { const input = $('#api-key'); input.type = input.type === 'password' ? 'text' : 'password'; $('#reveal-key').textContent = input.type === 'password' ? 'Tampilkan' : 'Sembunyikan' })
   $('#auth-dropdown').addEventListener('selectionchange', () => { $('#header-field').hidden = $('#auth-mode').value !== 'x-api-key' })
-  $('.nav-list').addEventListener('click', (event) => { const button = event.target.closest('.nav-link'); if (!button) return; document.querySelectorAll('.nav-link').forEach(x => x.classList.toggle('is-active', x === button)); const view = button.dataset.view; document.querySelectorAll('.view-panel').forEach(x => x.hidden = x.id !== `${view}-view`); $('#page-title').textContent = view === 'dashboard' ? 'Ringkasan aktivitas' : view === 'activity' ? 'Aktivitas terbaru' : 'Pengaturan tampilan' })
+  $('.nav-list').addEventListener('click', (event) => { const button = event.target.closest('.nav-link'); if (!button) return; document.querySelectorAll('.nav-link').forEach(x => x.classList.toggle('is-active', x === button)); const view = button.dataset.view; document.querySelectorAll('.view-panel').forEach(x => x.hidden = x.id !== `${view}-view`); $('#page-title').textContent = view === 'dashboard' ? 'Ringkasan aktivitas' : view === 'checker' ? 'Shopee Number Checker' : view === 'activity' ? 'Aktivitas terbaru' : 'Pengaturan tampilan' })
+  $('#run-check-button').addEventListener('click', async () => {
+    const input = $('#check-phone-input');
+    const phone = input.value.trim();
+    if (!phone) return message('Masukkan nomor telepon terlebih dahulu.');
+    const button = $('#run-check-button');
+    busy(button, true, 'Memeriksa…');
+    try {
+      const res = await call('/api/shopee/check', { phone });
+      const box = $('#checker-result-box');
+      const isReg = res.registered;
+      const isAvail = res.available;
+      
+      box.className = 'active-order-box';
+      box.innerHTML = `
+        <div class="order-status-badge">
+          <span class="status-pill ${isReg ? 'is-failed' : isAvail ? 'is-success' : 'is-waiting'}">${res.status_text}</span>
+          <h3>Status Shopee</h3>
+        </div>
+        <div class="order-phone-display">
+          <span class="label">Nomor Dicheck</span>
+          <div class="phone-row">
+            <strong>${res.phone}</strong>
+          </div>
+        </div>
+        <div class="otp-result-box">
+          <span class="label">Keterangan Shopee</span>
+          <div class="otp-code-wrapper" style="font-size:16px;">
+            ${isReg ? '❌ NOMOR SUDAH TERDAFTAR SHOPEE' : isAvail ? '✅ NOMOR BELUM TERDAFTAR (SIAP PAKAI)' : '⚠️ TIDAK DAPAT DIVERIFIKASI / CAPTCHA'}
+          </div>
+        </div>
+      `;
+      message(`Pengecekan nomor ${res.phone} selesai.`, 'success');
+    } catch (err) {
+      message(err.message);
+    } finally {
+      busy(button, false);
+    }
+  })
   $('#clear-history').addEventListener('click', () => { state.history = []; refreshMetrics(); renderHistory() })
   $('#notification-close').addEventListener('click', closeNotification)
   $('#notification-modal').addEventListener('click', (event) => { if (event.target.id === 'notification-modal') closeNotification() })

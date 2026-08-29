@@ -134,12 +134,54 @@ app.post('/api/otp/action', async (c) => {
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
 
+app.post('/api/shopee/check', async (c) => {
+  try {
+    const body = await c.req.json<{ phone?: string }>()
+    let phone = String(body.phone || '').trim().replace(/[^0-9]/g, '')
+    if (!phone) return c.json({ success: false, error: 'Nomor telepon tidak boleh kosong.' }, 400)
+
+    if (phone.startsWith('0')) phone = '62' + phone.slice(1)
+    if (!phone.startsWith('62')) phone = '62' + phone
+
+    const res = await fetch('https://shopee.co.id/api/v4/account/check_phone_number_registered', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        'X-Shopee-Language': 'id',
+        'Referer': 'https://shopee.co.id/buyer/login',
+      },
+      body: JSON.stringify({ phone_number: phone })
+    })
+
+    const text = await res.text()
+    let data: any = {}
+    try { data = JSON.parse(text) } catch {}
+
+    const registered = data?.data?.is_registered === true || data?.is_registered === true
+    const available = !registered && (data?.error === 0 || data?.data?.is_registered === false)
+
+    return c.json({
+      success: true,
+      phone,
+      registered: !!registered,
+      available: !!available,
+      status_text: registered ? 'TERDAFTAR (UNAVAILABLE)' : available ? 'BELUM TERDAFTAR (AVAILABLE)' : 'STATUS UNKNOWN / CAPTCHA',
+      raw: data
+    })
+  } catch (error) {
+    const result = apiError(error)
+    return c.json(result, result.status as 400)
+  }
+})
+
 app.get('/', (c) => c.render(
   <main class="app-shell">
     <aside class="sidebar" aria-label="Navigasi utama">
       <a class="brand" href="#dashboard" aria-label="OTP Uyeee Dashboard"><span class="brand-mark">O</span><span class="brand-name">OTP Uyeee</span></a>
       <nav class="nav-list">
         <button class="nav-link is-active" data-icon="⌂" data-tooltip="Ringkasan" aria-label="Ringkasan" data-view="dashboard"><span class="nav-label">Ringkasan</span></button>
+        <button class="nav-link" data-icon="🔍" data-tooltip="Shopee Checker" aria-label="Shopee Checker" data-view="checker"><span class="nav-label">Shopee Checker</span></button>
         <button class="nav-link" data-icon="◷" data-tooltip="Aktivitas" aria-label="Aktivitas" data-view="activity"><span class="nav-label">Aktivitas</span></button>
         <button class="nav-link" data-icon="⚙" data-tooltip="Pengaturan" aria-label="Pengaturan" data-view="settings"><span class="nav-label">Pengaturan</span></button>
       </nav>
@@ -198,6 +240,36 @@ app.get('/', (c) => c.render(
                   <button id="cancel-button" class="button button-danger" type="button">❌ Batalkan Order</button>
                 </div>
               </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="checker-view" class="view-panel" hidden>
+        <div class="content-grid">
+          <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">FILTER NOMOR SHOPEE</p><h2>Cek Pendaftaran Shopee</h2></div><span class="step">🔎</span></div>
+            <p class="muted">Periksa apakah nomor HP sudah terdaftar di Shopee. Jika terhubung dengan Order OTP, nomor yang sudah terdaftar akan otomatis dibatalkan!</p>
+            
+            <label class="field-label" for="check-phone-input">Nomor Telepon (Cek Manual)</label>
+            <div class="input-row">
+              <input id="check-phone-input" type="text" placeholder="Contoh: 08123456789 atau 628123456789" />
+              <button id="run-check-button" class="button button-primary" type="button" style="margin-top:0; width:auto; min-width:110px;">Cek Nomor</button>
+            </div>
+
+            <div style="margin-top:20px; padding-top:15px; border-top:1px solid var(--line);">
+              <label class="field-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input id="auto-cancel-registered" type="checkbox" checked style="width:auto;" />
+                <span>Otomatis Batalkan Order OTP jika Nomor Terdaftar Shopee</span>
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">HASIL PENGECEKAN</p><h2>Detail Status Nomor</h2></div></div>
+            <div id="checker-result-box" class="placeholder-state">
+              <span class="placeholder-icon">🔎</span>
+              <p>Masukkan nomor HP dan klik 'Cek Nomor' untuk melihat status pendaftaran di Shopee.</p>
             </div>
           </section>
         </div>
