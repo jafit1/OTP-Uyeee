@@ -147,48 +147,49 @@ app.post('/api/shopee/check', async (c) => {
     if (intl.startsWith('0')) intl = '62' + intl.slice(1)
     if (!intl.startsWith('62')) intl = '62' + intl
 
-    const commonHeaders = {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'User-Agent': 'Android app Shopee com.shopee.id v2.90.10',
-      'X-Shopee-Language': 'id',
-      'X-Requested-With': 'com.shopee.id',
-      'Client-Id': '10001',
-    }
-
-    // Try primary V4 API
-    let res = await fetch('https://shopee.co.id/api/v4/account/basic/get_account_info_by_phone', {
+    // 1. Primary check via ShopeePay/Shopee public transfer lookup API
+    const payRes = await fetch('https://shopee.co.id/api/v4/wallet/transfer/check_user_by_phone', {
       method: 'POST',
-      headers: commonHeaders,
-      body: JSON.stringify({ phone: national, phone_number: intl })
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'X-API-Source': 'pc',
+        'X-Shopee-Language': 'id',
+        'Referer': 'https://shopee.co.id/',
+      },
+      body: JSON.stringify({ phone: national })
     }).catch(() => null)
 
     let data: any = {}
-    if (res && res.ok) {
-      try { data = await res.json() } catch {}
+    if (payRes && payRes.ok) {
+      try { data = await payRes.json() } catch {}
     }
 
-    // Fallback V2 login check
-    if (!data?.data && !data?.is_registered) {
-      const res2 = await fetch('https://shopee.co.id/api/v2/authentication/check_phone_number', {
-        method: 'POST',
-        headers: commonHeaders,
-        body: JSON.stringify({ phone: intl })
+    // 2. Secondary check via account basic lookup
+    if (!data || Object.keys(data).length === 0 || data.error === 10001 || data.error === 403) {
+      const accRes = await fetch(`https://shopee.co.id/api/v4/account/basic/get_account_info?phone=${encodeURIComponent(national)}`, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+          'X-Shopee-Language': 'id',
+        }
       }).catch(() => null)
-      if (res2 && res2.ok) {
-        try { data = await res2.json() } catch {}
+      if (accRes && accRes.ok) {
+        try { data = await accRes.json() } catch {}
       }
     }
 
-    const isReg = data?.data?.is_registered === true || data?.is_registered === true || data?.data?.exist === true || data?.exist === true || data?.error === 10001
-    const isAvail = data?.data?.is_registered === false || data?.is_registered === false || data?.data?.exist === false || data?.exist === false || (data?.error === 0 && !isReg)
+    const isReg = data?.data?.userid > 0 || data?.data?.is_registered === true || data?.data?.user_id > 0 || data?.data?.username !== undefined || data?.userid > 0
+    const isAvail = data?.data?.is_registered === false || data?.error === 10002 || (data?.error === 0 && data?.data && !isReg)
+    const isBlocked = !isReg && !isAvail && (data?.error === 10001 || data?.error === 403 || data?.error === 99999)
 
     return c.json({
       success: true,
       phone: intl,
       registered: !!isReg,
       available: !!isAvail,
-      status_text: isReg ? 'TERDAFTAR (UNAVAILABLE)' : isAvail ? 'BELUM TERDAFTAR (AVAILABLE)' : 'CAPTCHA / ANTI-BOT DETECTED',
+      status_text: isReg ? 'TERDAFTAR (UNAVAILABLE)' : isAvail ? 'BELUM TERDAFTAR (AVAILABLE)' : isBlocked ? 'CAPTCHA / ANTI-BOT DETECTED' : 'BELUM TERDAFTAR (POTENSIAL)',
       raw: data
     })
   } catch (error) {
