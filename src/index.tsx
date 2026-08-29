@@ -5,12 +5,18 @@ type ProviderConfig = {
   apiKey?: string
   authMode?: 'bearer' | 'x-api-key'
   apiKeyHeader?: string
-  providerType?: 'default' | 'otpinstan'
-  otpinstanServer?: 's1' | 's2' | 's5'
 }
 
-const DEFAULT_BASE = 'https://dehuyzotp.shop'
-const OTPINSTAN_BASE = 'https://otpinstan.com/api/reseller'
+const PROVIDER_BASE_URL = 'https://dehuyzotp.shop'
+const DEFAULT_ENDPOINTS = {
+  services: '/api/services',
+  balance: '/api/balance',
+  order: '/api/rent',
+  check: '/api/sms/{token}',
+  retry: '/api/rent/{token}/retry',
+  status: '/api/order/{id}',
+  action: '/api/order/{id}',
+}
 
 const app = new Hono()
 app.use(renderer)
@@ -29,15 +35,10 @@ function providerConfig(input: ProviderConfig = {}) {
     apiKey,
     authMode: input.authMode === 'x-api-key' ? 'x-api-key' : 'bearer',
     apiKeyHeader: String(input.apiKeyHeader || 'x-api-key').replace(/[^a-zA-Z0-9-]/g, '') || 'x-api-key',
-    providerType: input.providerType === 'otpinstan' ? 'otpinstan' : 'default',
-    otpinstanServer: input.otpinstanServer || 's2',
   }
 }
 
-type ProviderCfg = ReturnType<typeof providerConfig>
-
-// ─── Default Provider (dehuyzotp.shop) ──────────────────
-async function reqDefault(config: ProviderCfg, path: string, options: RequestInit = {}) {
+async function requestProvider(config: ReturnType<typeof providerConfig>, path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers)
   headers.set('Accept', 'application/json')
   if (options.method && !['GET', 'DELETE'].includes(options.method)) headers.set('Content-Type', 'application/json')
@@ -46,7 +47,7 @@ async function reqDefault(config: ProviderCfg, path: string, options: RequestIni
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 15000)
   try {
-    const response = await fetch(`${DEFAULT_BASE}${safePath(path)}`, { ...options, headers, signal: controller.signal })
+    const response = await fetch(`${PROVIDER_BASE_URL}${safePath(path)}`, { ...options, headers, signal: controller.signal })
     const text = await response.text()
     let data: unknown = text
     try { data = text ? JSON.parse(text) : {} } catch {}
@@ -61,35 +62,6 @@ async function reqDefault(config: ProviderCfg, path: string, options: RequestIni
   } finally { clearTimeout(timeout) }
 }
 
-// ─── OTP Instan Provider ────────────────────────────────
-function otpinstanBase(config: ProviderCfg, sub = '') {
-  const server = config.otpinstanServer
-  if (server === 's1') return `${OTPINSTAN_BASE}/s1/${sub}`
-  if (server === 's5') return `${OTPINSTAN_BASE}/s5/${sub}`
-  return `${OTPINSTAN_BASE}/${sub}`
-}
-
-async function reqOtpinstan(config: ProviderCfg, path: string, options: RequestInit = {}) {
-  const url = `${OTPINSTAN_BASE}/${path}`
-  const headers = new Headers(options.headers)
-  headers.set('X-Api-Key', config.apiKey)
-  headers.set('Accept', 'application/json')
-  if (options.method && !['GET', 'DELETE'].includes(options.method)) headers.set('Content-Type', 'application/json')
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15000)
-  try {
-    const response = await fetch(url, { ...options, headers, signal: controller.signal })
-    const text = await response.text()
-    let data: any = {}
-    try { data = text ? JSON.parse(text) : {} } catch {}
-    if (!response.ok) throw new Error(`OTP Instan error (${response.status}): ${data.message || text.slice(0, 200)}`)
-    return data
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('OTP Instan timeout.')
-    throw error
-  } finally { clearTimeout(timeout) }
-}
-
 function apiError(error: unknown, status = 400) {
   return { success: false, error: error instanceof Error ? error.message : 'Terjadi kesalahan.', status }
 }
@@ -97,27 +69,11 @@ function apiError(error: unknown, status = 400) {
 app.post('/api/otp/services', async (c) => {
   try {
     const body = await c.req.json<{ providerConfig?: ProviderConfig }>()
-    const cfg = providerConfig(body.providerConfig)
-    
-    if (cfg.providerType === 'otpinstan') {
-      const raw = await reqOtpinstan(cfg, `services.php?country_id=6`)
-      const items = raw.data || []
-      const services = items.map((item: any) => ({
-        id: String(item.service),
-        name: String(item.name),
-        price: Number(item.price || 0),
-        count: Number(item.count || 0),
-      }))
-      return c.json({ success: true, services })
-    }
-    
-    const raw = await reqDefault(cfg, '/api/services', { method: 'GET' })
+    const raw = await requestProvider(providerConfig(body.providerConfig), DEFAULT_ENDPOINTS.services, { method: 'GET' })
     const items = Array.isArray(raw) ? raw : Array.isArray(raw.services) ? raw.services : Array.isArray(raw.data) ? raw.data : []
     const services = items.map((item: any, index) => ({
       id: String(item?.id ?? item?.service_id ?? item?.code ?? index + 1),
       name: String(item?.name ?? item?.service_name ?? item?.service ?? `Layanan ${index + 1}`),
-      price: Number(item?.price || 0),
-      count: Number(item?.count || 0),
     }))
     return c.json({ success: true, services })
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
@@ -126,15 +82,7 @@ app.post('/api/otp/services', async (c) => {
 app.post('/api/otp/balance', async (c) => {
   try {
     const body = await c.req.json<{ providerConfig?: ProviderConfig }>()
-    const cfg = providerConfig(body.providerConfig)
-    
-    if (cfg.providerType === 'otpinstan') {
-      const raw = await reqOtpinstan(cfg, 'balance.php')
-      const balance = Number(raw.balance ?? 0)
-      return c.json({ success: true, balance, reserved: 0, available: balance })
-    }
-    
-    const raw = await reqDefault(cfg, '/api/balance', { method: 'GET' })
+    const raw = await requestProvider(providerConfig(body.providerConfig), DEFAULT_ENDPOINTS.balance, { method: 'GET' })
     const balance = Number(raw.balance ?? 0)
     const reserved = Number(raw.reserved ?? 0)
     return c.json({ success: true, balance, reserved, available: Number(raw.available ?? balance - reserved) })
@@ -145,30 +93,8 @@ app.post('/api/otp/order', async (c) => {
   try {
     const body = await c.req.json<{ providerConfig?: ProviderConfig; serviceId?: string }>()
     if (!body.serviceId) return c.json({ success: false, error: 'Pilih layanan.' }, 400)
-    const cfg = providerConfig(body.providerConfig)
-    
-    if (cfg.providerType === 'otpinstan') {
-      const server = cfg.otpinstanServer
-      if (server === 's1') {
-        const raw = await reqOtpinstan(cfg, 's1/order.php', {
-          method: 'POST',
-          body: JSON.stringify({ platform_id: Number(body.serviceId), country_id: 6 }),
-        })
-        if (!raw.success) throw new Error(raw.message || 'Order gagal.')
-        return c.json({ success: true, token: raw.order_id, order_id: raw.order_id, number: raw.phone, service_id: body.serviceId, status: 'WAITING', expires_at: null })
-      } else {
-        const path = server === 's5' ? 's5/order.php' : 'order.php'
-        const raw = await reqOtpinstan(cfg, path, {
-          method: 'POST',
-          body: JSON.stringify({ service: body.serviceId, country: 6 }),
-        })
-        if (!raw.success) throw new Error(raw.message || 'Order gagal.')
-        return c.json({ success: true, token: raw.order_id, order_id: raw.order_id, number: raw.phone, service_id: body.serviceId, status: 'WAITING', expires_at: null })
-      }
-    }
-    
     const service_id = isNaN(Number(body.serviceId)) ? body.serviceId : Number(body.serviceId)
-    const raw = await reqDefault(cfg, '/api/rent', {
+    const raw = await requestProvider(providerConfig(body.providerConfig), DEFAULT_ENDPOINTS.order, {
       method: 'POST',
       body: JSON.stringify({ service_id, service: service_id })
     })
@@ -183,20 +109,8 @@ app.post('/api/otp/check', async (c) => {
   try {
     const body = await c.req.json<{ providerConfig?: ProviderConfig; token?: string }>()
     if (!body.token) return c.json({ success: false, error: 'Token tidak ditemukan.' }, 400)
-    const cfg = providerConfig(body.providerConfig)
-    
-    if (cfg.providerType === 'otpinstan') {
-      const server = cfg.otpinstanServer
-      const path = server === 's1' ? `s1/check.php?order_id=${body.token}` : server === 's5' ? `s5/check.php?order_id=${body.token}` : `check.php?order_id=${body.token}`
-      const raw = await reqOtpinstan(cfg, path)
-      const otp = raw.otp ? String(raw.otp) : null
-      const st = String(raw.status || '').toLowerCase()
-      const status = otp || ['received', 'done', 'completed'].includes(st) ? 'RECEIVED' : ['cancel', 'cancelled', 'failed', 'expired'].includes(st) ? 'FAILED' : 'WAITING'
-      return c.json({ success: true, status, otp_code: otp, message: raw.message || (otp ? 'Kode diterima.' : 'Menunggu OTP.') })
-    }
-    
-    const path = `/api/sms/${encodeURIComponent(body.token)}`
-    const raw = await reqDefault(cfg, path, { method: 'GET' })
+    const path = DEFAULT_ENDPOINTS.check.replace('{token}', encodeURIComponent(body.token))
+    const raw = await requestProvider(providerConfig(body.providerConfig), path, { method: 'GET' })
     const otp = raw.otp ? String(raw.otp) : null
     const state = String(raw.state || '').toLowerCase()
     const status = otp || ['success', 'received', 'done'].includes(state) ? 'RECEIVED' : ['cancel', 'cancelled', 'failed', 'expired'].includes(state) ? 'FAILED' : 'WAITING'
@@ -208,23 +122,8 @@ app.post('/api/otp/action', async (c) => {
   try {
     const body = await c.req.json<{ providerConfig?: ProviderConfig; orderRef?: string; action?: string }>()
     if (!body.orderRef || !['done', 'cancel'].includes(String(body.action))) return c.json({ success: false, error: 'Order/aksi tidak valid.' }, 400)
-    const cfg = providerConfig(body.providerConfig)
-    
-    if (cfg.providerType === 'otpinstan') {
-      if (body.action === 'cancel') {
-        const server = cfg.otpinstanServer
-        const path = server === 's1' ? 's1/cancel.php' : server === 's5' ? 's5/cancel.php' : 'cancel.php'
-        const raw = await reqOtpinstan(cfg, path, {
-          method: 'POST',
-          body: JSON.stringify({ order_id: body.orderRef }),
-        })
-        return c.json({ success: true, action: 'cancel', refunded: raw.refund || 0 })
-      }
-      return c.json({ success: true, action: body.action, refunded: 0 })
-    }
-    
-    const path = `/api/order/${encodeURIComponent(body.orderRef)}`
-    const raw = await reqDefault(cfg, path, { method: 'POST', body: JSON.stringify({ action: body.action }) })
+    const path = DEFAULT_ENDPOINTS.action.replace('{id}', encodeURIComponent(body.orderRef))
+    const raw = await requestProvider(providerConfig(body.providerConfig), path, { method: 'POST', body: JSON.stringify({ action: body.action }) })
     return c.json({ success: true, action: body.action, refunded: Number(raw.refunded || 0) })
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
@@ -489,12 +388,10 @@ app.get('/', (c) => c.render(
           <label class="field-label" for="api-key">API key provider</label>
           <div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="Masukkan API key"/><button id="reveal-key" class="text-button" type="button">Tampilkan</button></div>
           <div class="field-grid">
-            <label class="field-label">Provider
-              <div id="provider-dropdown" class="custom-select"><input id="provider-type" type="hidden" value="default" /><button id="provider-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="provider-label">Default Provider</span><span class="select-chevron">⌄</span></button><div id="provider-options" class="select-options" role="listbox" hidden><button class="select-option is-selected" type="button" role="option" aria-selected="true" data-value="default">Default Provider</button><button class="select-option" type="button" role="option" aria-selected="false" data-value="otpinstan">OTP Instan</button></div></div>
+            <label class="field-label">Metode autentikasi
+              <div id="auth-dropdown" class="custom-select"><input id="auth-mode" type="hidden" value="bearer" /><button id="auth-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="auth-label">Bearer token</span><span class="select-chevron">⌄</span></button><div id="auth-options" class="select-options" role="listbox" hidden><button class="select-option is-selected" type="button" role="option" aria-selected="true" data-value="bearer">Bearer token</button><button class="select-option" type="button" role="option" aria-selected="false" data-value="x-api-key">x-api-key header</button></div></div>
             </label>
-            <label class="field-label">Server
-              <div id="server-dropdown" class="custom-select" hidden><input id="otpinstan-server" type="hidden" value="s2" /><button id="server-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="server-label">Server 2</span><span class="select-chevron">⌄</span></button><div id="server-options" class="select-options" role="listbox" hidden><button class="select-option is-selected" type="button" role="option" aria-selected="true" data-value="s2">Server 2</button><button class="select-option" type="button" role="option" aria-selected="false" data-value="s1">Server 1</button><button class="select-option" type="button" role="option" aria-selected="false" data-value="s5">Server 5</button></div></div>
-            </label>
+            <label id="header-field" class="field-label">Nama header<input id="header-name" value="x-api-key" /></label>
           </div>
           <div class="button-group" style="margin-top: 15px;">
             <button id="connect-button" class="button button-primary" type="button" style="flex: 1;">Uji & Simpan Provider</button>
