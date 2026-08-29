@@ -48,7 +48,7 @@
     })
   }
 
-  function config() { return { apiKey: $('#api-key').value.trim(), authMode: $('#auth-mode').value, apiKeyHeader: $('#header-name').value.trim() || 'x-api-key' } }
+  function config() { return { apiKey: $('#api-key').value.trim(), providerType: $('#provider-type').value, otpinstanServer: $('#otpinstan-server').value, authMode: $('#auth-mode')?.value || 'bearer', apiKeyHeader: $('#header-name')?.value?.trim() || 'x-api-key' } }
   async function call(path, body) {
     const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const data = await response.json().catch(() => ({ success: false, error: 'Server mengirim respons yang tidak valid.' }))
@@ -102,7 +102,10 @@
     if (!filtered.length) {
       options.innerHTML = '<div style="padding:10px;color:var(--muted);font-size:12px;text-align:center;">Layanan tidak ditemukan</div>'
     } else {
-      options.innerHTML = filtered.map(item => `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button>`).join('')
+      options.innerHTML = filtered.map(item => {
+        const price = item.price ? `<span class="option-meta"><span class="service-price">Rp ${item.price.toLocaleString('id-ID')}</span>${item.count ? `<span class="service-count">(${item.count})</span>` : ''}</span>` : ''
+        return `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}"><span>${escapeHtml(item.name)}</span>${price}</button>`
+      }).join('')
     }
   }
 
@@ -238,7 +241,10 @@
 
   $('#copy-button').addEventListener('click', async () => { if (!state.order) return; try { await navigator.clipboard.writeText(state.order.number); message('Nomor disalin.', 'success') } catch { message('Clipboard tidak tersedia.') } })
   $('#reveal-key').addEventListener('click', () => { const input = $('#api-key'); input.type = input.type === 'password' ? 'text' : 'password'; $('#reveal-key').textContent = input.type === 'password' ? 'Tampilkan' : 'Sembunyikan' })
-  $('#auth-dropdown').addEventListener('selectionchange', () => { $('#header-field').hidden = $('#auth-mode').value !== 'x-api-key' })
+  $('#provider-dropdown').addEventListener('selectionchange', () => {
+    const isOtpinstan = $('#provider-type').value === 'otpinstan'
+    $('#server-dropdown').hidden = !isOtpinstan
+  })
   $('.nav-list').addEventListener('click', (event) => { const button = event.target.closest('.nav-link'); if (!button) return; document.querySelectorAll('.nav-link').forEach(x => x.classList.toggle('is-active', x === button)); const view = button.dataset.view; document.querySelectorAll('.view-panel').forEach(x => x.hidden = x.id !== `${view}-view`); $('#page-title').textContent = view === 'dashboard' ? 'Ringkasan aktivitas' : view === 'checker' ? 'Shopee Number Checker' : view === 'activity' ? 'Aktivitas terbaru' : 'Pengaturan tampilan' })
 
   // Shopee Checker
@@ -290,8 +296,9 @@
   async function autoConnect(saved) {
     if (!saved || !saved.apiKey) return
     $('#api-key').value = saved.apiKey
-    if (saved.authMode) selectValue($('#auth-dropdown'), saved.authMode, saved.authMode === 'x-api-key' ? 'x-api-key header' : 'Bearer token')
-    if (saved.apiKeyHeader) $('#header-name').value = saved.apiKeyHeader
+    if (saved.providerType) selectValue($('#provider-dropdown'), saved.providerType, saved.providerType === 'otpinstan' ? 'OTP Instan' : 'Default Provider')
+    if (saved.otpinstanServer) selectValue($('#server-dropdown'), saved.otpinstanServer, `Server ${saved.otpinstanServer.replace('s','')}`)
+    if (saved.providerType !== 'otpinstan') $('#server-dropdown').hidden = true
     $('#revoke-button').hidden = false
 
     try {
@@ -311,7 +318,7 @@
     }
   }
 
-  $('#header-field').hidden = true; setTheme(); refreshMetrics(); renderHistory()
+  setTheme(); refreshMetrics(); renderHistory()
   const savedConfig = getStoredConfig()
   if (savedConfig) autoConnect(savedConfig)
 
