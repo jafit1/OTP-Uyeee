@@ -228,24 +228,63 @@ app.post('/api/otp/action', authMiddleware, async (c) => {
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
 
-// ── Deposit QRIS Dengan Kode Unik ──
+// ── Deposit QRIS Menggunakan TokoPay ──
+import { generateTokopaySignature } from './tokopay.js'
+
+const TOKOPAY_MERCHANT_ID = process.env.TOKOPAY_MERCHANT_ID || ''
+const TOKOPAY_SECRET_KEY = process.env.TOKOPAY_SECRET_KEY || ''
+
 app.post('/api/deposit/create', authMiddleware, async (c) => {
   try {
     const user = c.get('user')
     const { amount } = await c.req.json()
     const baseAmount = Number(amount)
+    
+    // TokoPay minimum transaksi biasanya Rp 1.000 atau Rp 5.000 (tergantung metode)
     if (isNaN(baseAmount) || baseAmount < 5000) {
       return c.json({ success: false, error: 'Minimal deposit Rp 5.000' }, 400)
     }
 
-    // Buat 3-digit kode unik (misal: 1 - 999)
-    const uniqueCode = Math.floor(Math.random() * 999) + 1
-    const totalPay = baseAmount + uniqueCode
-    const txId = 'dep_' + Math.random().toString(36).substring(2, 10)
+    if (!TOKOPAY_MERCHANT_ID || !TOKOPAY_SECRET_KEY) {
+      return c.json({ success: false, error: 'Sistem TokoPay belum dikonfigurasi oleh Admin.' }, 500)
+    }
 
+    const txId = 'dep_' + Math.random().toString(36).substring(2, 12)
+    const signature = generateTokopaySignature(TOKOPAY_MERCHANT_ID, TOKOPAY_SECRET_KEY, txId)
+
+    // Request ke API TokoPay untuk membuat QRIS
+    const reqBody = {
+      merchant_id: TOKOPAY_MERCHANT_ID,
+      kode_channel: 'QRIS',
+      reff_id: txId,
+      amount: baseAmount,
+      customer_name: user.email.split('@')[0],
+      customer_email: user.email,
+      customer_phone: '081234567890',
+      redirect_url: 'https://otp-uyeee.vercel.app',
+      expired_time: 15, // 15 menit
+      signature: signature
+    }
+
+    const res = await fetch('https://api.tokopay.id/v1/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reqBody)
+    })
+    
+    const data = await res.json()
+    
+    if (data.status !== 'Success' && data.status !== 'Sukses' && data.status !== 'success' && data.status !== true) {
+      throw new Error(data.error_msg || data.message || 'Gagal membuat QRIS TokoPay')
+    }
+
+    const totalPay = data.data.total_bayar || baseAmount
+    const qrUrl = data.data.qr_link || data.data.qr_url || data.data.checkout_url || data.data.pay_url
+
+    // Simpan pending transaksi
     await db.execute({
       sql: 'INSERT INTO transactions (id, user_id, amount, type, status, reference) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [txId, user.id, totalPay, 'DEPOSIT', 'PENDING', `QRIS-UNIK-${uniqueCode}`]
+      args: [txId, user.id, totalPay, 'DEPOSIT', 'PENDING', qrUrl]
     })
 
     return c.json({
@@ -253,13 +292,47 @@ app.post('/api/deposit/create', authMiddleware, async (c) => {
       deposit: {
         id: txId,
         base_amount: baseAmount,
-        unique_code: uniqueCode,
         total_pay: totalPay,
-        qr_image: 'https://i.ibb.co.com/84NswyQG/QRIS-Admin.png', // QRIS DANA Bisnis Admin
-        note: `Transfer tepat sebesar Rp ${totalPay.toLocaleString('id-ID')} agar sistem otomatis mengenali transfer Anda!`
+        qr_image: qrUrl,
+        checkout_url: data.data.checkout_url || qrUrl,
+        note: `Silakan scan QRIS di atas melalui DANA/OVO/Gopay/BCA. Saldo akan otomatis bertambah setelah pembayaran berhasil.`
       }
     })
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
+})
+
+// ── Webhook Callback dari TokoPay ──
+app.post('/api/deposit/webhook', async (c) => {
+  try {
+    const body = await c.req.json()
+    // Contoh payload TokoPay: { status: 'Success', reff_id: 'dep_xxx', amount: 10000, signature: 'xxx' }
+    
+    const txId = body.reff_id || body.ref_id
+    const status = (body.status || '').toLowerCase()
+    
+    if (status === 'success' || status === 'dibayar' || status === 'paid') {
+      // Cari transaksi
+      const resTx = await db.execute({ sql: 'SELECT * FROM transactions WHERE id = ? AND status = ?', args: [txId, 'PENDING'] })
+      if (resTx.rows.length === 0) {
+        return c.json({ success: true, message: 'Transaction already processed or not found' })
+      }
+      
+      const tx = resTx.rows[0] as any
+      const amount = Number(tx.amount)
+      
+      // Update transaksi jadi SUCCESS
+      await db.execute({ sql: 'UPDATE transactions SET status = ? WHERE id = ?', args: ['SUCCESS', txId] })
+      
+      // Tambahkan saldo user
+      await db.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE id = ?', args: [amount, tx.user_id] })
+      
+      return c.json({ success: true, message: 'Deposit successful' })
+    }
+    
+    return c.json({ success: true, message: 'Status not success, ignored' })
+  } catch (error) { 
+    return c.json({ success: false, error: 'Internal server error' }, 500) 
+  }
 })
 
 // ── Shopee Checker APIs ──
@@ -390,37 +463,35 @@ app.get('*', (c) => {
         </div>
       </div>
 
-      <!-- DEPOSIT QRIS KODE UNIK MODAL -->
+      <!-- DEPOSIT QRIS OTOMATIS MODAL -->
       <div id="deposit-modal" class="confirm-overlay" hidden>
         <div class="confirm-box" style="max-width:400px;">
-          <h3>Isi Saldo (QRIS Kode Unik)</h3>
-          <p class="muted" style="margin-bottom:15px; font-size:12px;">Transfer pas sesuai total harga hingga digit terakhir agar otomatis terverifikasi.</p>
+          <h3>Isi Saldo (QRIS Otomatis)</h3>
+          <p class="muted" style="margin-bottom:15px; font-size:12px;">Saldo akan otomatis masuk ke akun Anda detik itu juga setelah Anda menyelesaikan pembayaran via DANA/Gopay/OVO/ShopeePay/M-Banking.</p>
           
           <div id="deposit-form-step">
             <label class="field-label" style="margin-top:0;">Nominal Isi Saldo (Rp)</label>
             <input id="deposit-amount-input" type="number" placeholder="Minimal 5000" style="margin-bottom:15px;" />
             <div class="confirm-actions">
               <button id="deposit-close-btn" class="confirm-cancel" type="button">Batal</button>
-              <button id="deposit-create-btn" class="button button-primary" type="button" style="margin:0;">Buat QRIS Kode Unik</button>
+              <button id="deposit-create-btn" class="button button-primary" type="button" style="margin:0;">Buat Kode QRIS</button>
             </div>
           </div>
 
           <div id="deposit-qr-step" hidden>
             <div style="background:#fff; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;">
-              <img id="deposit-qr-img" src="" alt="QRIS" style="width:100%; max-width:200px; margin:0 auto; border-radius:8px; display:block;" />
-              <p style="margin-top:10px; font-size:11px; color:#162033; font-weight:700;">QRIS DANA / ALL PAYMENT</p>
+              <img id="deposit-qr-img" src="" alt="QRIS" style="width:100%; max-width:220px; margin:0 auto; border-radius:8px; display:block;" />
+              <p style="margin-top:10px; font-size:11px; color:#162033; font-weight:700;">QRIS TOKOPAY / ALL PAYMENT</p>
             </div>
             
             <div style="background:var(--surface-soft); padding:12px; border-radius:8px; font-size:12px; margin-bottom:15px;">
-              <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Nominal Deposit:</span><span id="dep-base-val">Rp 0</span></div>
-              <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:var(--brand);"><span>Kode Unik Verifikasi:</span><strong id="dep-code-val">+0</strong></div>
-              <hr style="margin:8px 0; border-color:var(--line);" />
               <div style="display:flex; justify-content:space-between; font-size:14px; font-weight:800;"><span>TOTAL DIBAYAR:</span><strong id="dep-total-val" style="color:var(--success);">Rp 0</strong></div>
             </div>
 
             <p id="deposit-note-text" style="font-size:11px; color:var(--waiting); margin-bottom:15px; font-weight:600; text-align:center;"></p>
             <div class="confirm-actions">
-              <button id="deposit-done-btn" class="button button-primary" type="button" style="margin:0;">Saya Sudah Transfer</button>
+              <a id="deposit-checkout-link" href="#" target="_blank" class="button button-primary" style="margin:0; text-align:center; text-decoration:none;">Buka Halaman Pembayaran</a>
+              <button id="deposit-done-btn" class="button button-quiet" type="button" style="margin:0;">Tutup</button>
             </div>
           </div>
         </div>

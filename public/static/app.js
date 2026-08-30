@@ -524,10 +524,9 @@
       const dep = res.deposit
 
       $('#deposit-qr-img').src = dep.qr_image
-      $('#dep-base-val').textContent = `Rp ${Number(dep.base_amount).toLocaleString('id-ID')}`
-      $('#dep-code-val').textContent = `+ Rp ${dep.unique_code}`
       $('#dep-total-val').textContent = `Rp ${Number(dep.total_pay).toLocaleString('id-ID')}`
       $('#deposit-note-text').textContent = dep.note
+      $('#deposit-checkout-link').href = dep.checkout_url
 
       $('#deposit-form-step').hidden = true
       $('#deposit-qr-step').hidden = false
@@ -539,8 +538,8 @@
   })
 
   $('#deposit-done-btn')?.addEventListener('click', () => {
-    message('Permintaan deposit telah dibuat. Saldo akan otomatis bertambah setelah transfer terkonfirmasi!', 'success')
     $('#deposit-close-btn').click()
+    refreshUserData()
   })
 
   setTheme(); refreshMetrics(); renderHistory(); initUserSession()
