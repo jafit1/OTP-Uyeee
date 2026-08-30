@@ -440,7 +440,21 @@
       state.user = res.user
       toggleAuthModal(false)
       message(isRegisterMode ? 'Pendaftaran berhasil!' : 'Berhasil masuk ke akun.', 'success')
-      await initUserSession()
+      
+      $('#user-profile-badge').style.display = 'flex'
+      $('#user-email-display').textContent = res.user.email
+      $('#balance-value').textContent = `Rp ${Number(res.user.balance || 0).toLocaleString('id-ID')}`
+      
+      try {
+        const sRes = await call('/api/otp/services', null, 'GET')
+        state.services = sRes.services
+        const searchInput = $('#service-search')
+        searchInput.disabled = !state.services.length
+        searchInput.placeholder = state.services.length ? `Cari di ${state.services.length} layanan...` : 'Tidak ada layanan'
+        renderServiceOptions()
+        $('#order-button').disabled = !state.services.length
+      } catch(e) { console.error("Gagal load layanan:", e) }
+      
     } catch (err) {
       message(err.message)
     } finally {
@@ -473,8 +487,10 @@
 
   async function initUserSession() {
     try {
-      const res = await call('/api/auth/me', null, 'GET')
-      if (res.user) {
+      const response = await fetch('/api/auth/me', { method: 'GET', headers: { 'Accept': 'application/json' } })
+      const res = await response.json()
+      
+      if (res.success && res.user) {
         state.user = res.user
         $('#user-profile-badge').style.display = 'flex'
         $('#user-email-display').textContent = res.user.email
@@ -482,13 +498,17 @@
         toggleAuthModal(false)
 
         // Load Services List
-        const sRes = await call('/api/otp/services', null, 'GET')
-        state.services = sRes.services
-        const searchInput = $('#service-search')
-        searchInput.disabled = !state.services.length
-        searchInput.placeholder = state.services.length ? `Cari di ${state.services.length} layanan...` : 'Tidak ada layanan'
-        renderServiceOptions()
-        $('#order-button').disabled = !state.services.length
+        try {
+          const sRes = await call('/api/otp/services', null, 'GET')
+          state.services = sRes.services
+          const searchInput = $('#service-search')
+          searchInput.disabled = !state.services.length
+          searchInput.placeholder = state.services.length ? `Cari di ${state.services.length} layanan...` : 'Tidak ada layanan'
+          renderServiceOptions()
+          $('#order-button').disabled = !state.services.length
+        } catch(e) {
+          console.error("Gagal load layanan:", e)
+        }
       } else {
         toggleAuthModal(true)
       }

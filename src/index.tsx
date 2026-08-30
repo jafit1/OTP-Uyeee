@@ -438,8 +438,8 @@ app.get('*', (c) => {
       <div id="confirm-overlay" class="confirm-overlay" hidden><div class="confirm-box"><h3 id="confirm-title">Konfirmasi</h3><p id="confirm-text"></p><div class="confirm-actions"><button id="confirm-cancel" class="confirm-cancel" type="button">Batal</button><button id="confirm-ok" class="confirm-ok" type="button">Ya, Batalkan</button></div></div></div>
       
       <!-- AUTH MODAL / OVERLAY (LOGIN & REGISTER) -->
-      <div id="auth-modal" class="confirm-overlay" style="z-index:99999;">
-        <div class="confirm-box" style="max-width:380px;">
+      <div id="auth-modal" class="confirm-overlay" style="z-index:99999; background: var(--bg); backdrop-filter: none; opacity: 1;">
+        <div class="confirm-box" style="max-width:380px; box-shadow: 0 20px 40px rgba(0,0,0,0.3); border: 1px solid var(--brand);">
           <h3 id="auth-form-title">Masuk ke OTP Uyeee</h3>
           <p id="auth-form-desc" class="muted" style="margin-bottom:15px; font-size:12px;">Masukkan email & password akun Anda untuk melanjutkan.</p>
           
