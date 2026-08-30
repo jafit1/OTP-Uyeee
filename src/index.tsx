@@ -301,26 +301,6 @@ app.get('/', (c) => c.render(
       <header class="topbar"><div><p class="eyebrow">PUSAT VERIFIKASI</p><h1 id="page-title">Ringkasan aktivitas</h1></div><div class="topbar-actions"><span id="connection-status" class="status-pill">Belum terhubung</span><button id="theme-toggle" class="icon-button" type="button" aria-label="Ganti tema">☾</button></div></header>
       <div id="notification-modal" class="notification-modal" role="presentation" hidden><section class="notification-card"><span id="notification-icon" class="notification-icon">!</span><p id="notification-text" class="notification-text"></p><button id="notification-close" class="notification-close" type="button" aria-label="Tutup">×</button></section></div>
       <div id="confirm-overlay" class="confirm-overlay" hidden><div class="confirm-box"><h3 id="confirm-title">Konfirmasi</h3><p id="confirm-text"></p><div class="confirm-actions"><button id="confirm-cancel" class="confirm-cancel" type="button">Batal</button><button id="confirm-ok" class="confirm-ok" type="button">Ya, Batalkan</button></div></div></div>
-      
-      <div id="deposit-modal" class="confirm-overlay" hidden>
-        <div class="confirm-box" style="max-width:380px;">
-          <h3>Isi Saldo (Deposit QRIS)</h3>
-          <p class="muted" style="margin-bottom:15px; font-size:12px;">Top-up saldo akan langsung ditambahkan ke provider API (dehuyzotp.shop). Silakan scan QRIS di bawah ini melalui DANA/OVO/Gopay/ShopeePay/BCA, lalu konfirmasi ke Admin.</p>
-          
-          <div style="background:#fff; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;">
-            <img src="https://i.ibb.co.com/84NswyQG/QRIS-Admin.png" alt="QRIS" style="width:100%; max-width:200px; margin:0 auto; border-radius:8px;" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2Y1ZjdmYiIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGFsaWdubWVudC1iYXNlbGluZT0ibWlkZGxlIiBmaWxsPSIjNjg3MzhhIj5HQU1CQVIgUVJJUzwvdGV4dD48L3N2Zz4='"/>
-            <p style="margin-top:10px; font-size:11px; color:#162033; font-weight:700;">A.N. ADMIN OTP UYEEE</p>
-          </div>
-
-          <label class="field-label" style="margin-top:0;">Nominal Transfer (Rp)</label>
-          <input id="deposit-amount" type="number" placeholder="Contoh: 20000" autocomplete="off" data-lpignore="true" style="margin-bottom:15px;" />
-          
-          <div class="confirm-actions">
-            <button id="deposit-cancel" class="confirm-cancel" type="button">Tutup</button>
-            <button id="deposit-confirm" class="button button-primary" type="button" style="margin:0;">Konfirmasi via WA</button>
-          </div>
-        </div>
-      </div>
       <section id="dashboard-view" class="view-panel">
         <section class="metrics" aria-label="Statistik order"><article class="metric-card"><span>Total order</span><strong id="metric-total">0</strong><small>Dalam sesi ini</small></article><article class="metric-card"><span>Berhasil</span><strong id="metric-success">0</strong><small>Kode telah diterima</small></article><article class="metric-card"><span>Menunggu</span><strong id="metric-waiting">0</strong><small>Perlu ditindaklanjuti</small></article></section>
         <div class="content-grid">

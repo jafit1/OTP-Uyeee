@@ -485,33 +485,10 @@
     message('API Key dihapus.', 'success')
   })
 
-  // Deposit Logic
+  // Deposit Logic - Redirect langsung ke Web Provider
   $('#deposit-btn')?.addEventListener('click', () => {
-    const modal = $('#deposit-modal')
-    modal.hidden = false
-    requestAnimationFrame(() => modal.classList.add('is-visible'))
+    // Karena kita tidak tahu persis URL login user di web mereka,
+    // kita arahkan ke halaman utama atau dashboard mereka
+    window.open('https://dehuyzotp.shop/deposit', '_blank')
   })
-  
-  $('#deposit-cancel')?.addEventListener('click', () => {
-    const modal = $('#deposit-modal')
-    modal.classList.remove('is-visible')
-    setTimeout(() => { modal.hidden = true }, 180)
-  })
-
-  $('#deposit-confirm')?.addEventListener('click', () => {
-    const amount = $('#deposit-amount').value.trim()
-    if (!amount || isNaN(amount) || Number(amount) < 10000) {
-      return message('Minimal deposit adalah Rp 10.000')
-    }
-    
-    // Redirect ke WhatsApp Admin (Ganti dengan nomor WhatsApp Anda!)
-    const adminPhone = '6281234567890' 
-    const apiKey = state.config?.apiKey ? state.config.apiKey.substring(0, 8) + '...' : 'Unknown'
-    const text = `Halo Admin, saya ingin Deposit Saldo OTP UYEEE.\n\n*Nominal:* Rp ${Number(amount).toLocaleString('id-ID')}\n*API Key ID:* ${apiKey}\n\nSaya telah mentransfer via QRIS sesuai nominal. Berikut bukti transfernya:`
-    const waUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(text)}`
-    
-    window.open(waUrl, '_blank')
-    $('#deposit-cancel').click()
-  })
-
 })()
