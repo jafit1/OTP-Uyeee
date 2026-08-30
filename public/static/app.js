@@ -250,6 +250,7 @@
       renderServiceOptions()
       $('#order-button').disabled = !state.services.length
       $('#balance-box').hidden = false
+      $('#deposit-btn').hidden = false
       $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available)
       status(`${state.services.length} layanan aktif`, 'is-success')
       message('Provider & API Key berhasil tersimpan.', 'success')
@@ -449,6 +450,7 @@
       renderServiceOptions()
       $('#order-button').disabled = !state.services.length
       $('#balance-box').hidden = false
+      $('#deposit-btn').hidden = false
       $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available)
       status(`${state.services.length} layanan aktif`, 'is-success')
     } catch (error) {
@@ -477,8 +479,39 @@
     $('#service-options').innerHTML = ''
     $('#order-button').disabled = true
     $('#balance-box').hidden = true
+    $('#deposit-btn').hidden = true
     $('#revoke-button').hidden = true
     status('Belum terhubung', '')
     message('API Key dihapus.', 'success')
   })
+
+  // Deposit Logic
+  $('#deposit-btn')?.addEventListener('click', () => {
+    const modal = $('#deposit-modal')
+    modal.hidden = false
+    requestAnimationFrame(() => modal.classList.add('is-visible'))
+  })
+  
+  $('#deposit-cancel')?.addEventListener('click', () => {
+    const modal = $('#deposit-modal')
+    modal.classList.remove('is-visible')
+    setTimeout(() => { modal.hidden = true }, 180)
+  })
+
+  $('#deposit-confirm')?.addEventListener('click', () => {
+    const amount = $('#deposit-amount').value.trim()
+    if (!amount || isNaN(amount) || Number(amount) < 10000) {
+      return message('Minimal deposit adalah Rp 10.000')
+    }
+    
+    // Redirect ke WhatsApp Admin (Ganti dengan nomor WhatsApp Anda!)
+    const adminPhone = '6281234567890' 
+    const apiKey = state.config?.apiKey ? state.config.apiKey.substring(0, 8) + '...' : 'Unknown'
+    const text = `Halo Admin, saya ingin Deposit Saldo OTP UYEEE.\n\n*Nominal:* Rp ${Number(amount).toLocaleString('id-ID')}\n*API Key ID:* ${apiKey}\n\nSaya telah mentransfer via QRIS sesuai nominal. Berikut bukti transfernya:`
+    const waUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(text)}`
+    
+    window.open(waUrl, '_blank')
+    $('#deposit-cancel').click()
+  })
+
 })()
