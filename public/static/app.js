@@ -1,6 +1,6 @@
 (() => {
   const $ = (selector) => document.querySelector(selector)
-  const state = { config: null, services: [], orders: [], history: [] }
+  const state = { user: null, services: [], orders: [], history: [] }
   const themeKey = 'veriflow-theme'
   const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
 
@@ -48,14 +48,15 @@
     })
   }
 
-  function config() { return { apiKey: $('#api-key').value.trim(), authMode: $('#auth-mode').value, apiKeyHeader: $('#header-name').value.trim() || 'x-api-key' } }
-  async function call(path, body) {
-    const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    const data = await response.json().catch(() => ({ success: false, error: 'Server mengirim respons yang tidak valid.' }))
+  async function call(path, body, method = 'POST') {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } }
+    if (body) opts.body = JSON.stringify(body)
+    const response = await fetch(path, opts)
+    const data = await response.json().catch(() => ({ success: false, error: 'Server mengirim respons tidak valid.' }))
     if (!response.ok || !data.success) throw new Error(data.error || 'Request gagal diproses.')
     return data
   }
-  function status(text, type = '') { const item = $('#connection-status'); item.textContent = text; item.className = `status-pill ${type}` }
+
   function refreshMetrics() { $('#metric-total').textContent = state.history.length; $('#metric-success').textContent = state.history.filter(x => x.status === 'RECEIVED').length; $('#metric-waiting').textContent = state.history.filter(x => x.status === 'WAITING').length }
   function renderHistory() { const body = $('#history-body'); if (!state.history.length) { body.innerHTML = '<tr><td colspan="4" class="empty-state">Belum ada aktivitas.</td></tr>'; return }; body.innerHTML = state.history.map(x => `<tr><td>${x.time}</td><td>${escapeHtml(x.service)}</td><td>${escapeHtml(x.number)}</td><td class="table-status">${x.status}</td></tr>`).join('') }
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char])) }
@@ -145,11 +146,11 @@
 
   // Auto Poll WAITING orders every 5s
   setInterval(async () => {
-    if (!state.config) return
+    if (!state.user) return
     const waitingOrders = state.orders.filter(o => o.status === 'WAITING')
     for (const order of waitingOrders) {
       try {
-        const data = await call('/api/otp/check', { providerConfig: state.config, token: order.token })
+        const data = await call('/api/otp/check', { token: order.token })
         if (data.status !== order.status || data.otp_code !== order.otp_code) {
           order.status = data.status
           order.otp_code = data.otp_code
@@ -172,7 +173,7 @@
     } else {
       options.innerHTML = filtered.map(item => {
         const priceStr = item.price ? `<span class="option-meta"><span class="service-price">Rp ${Number(item.price).toLocaleString('id-ID')}</span>${item.count ? `<span class="service-count">(${item.count})</span>` : ''}</span>` : ''
-        return `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}"><span>${escapeHtml(item.name)}</span>${priceStr}</button>`
+        return `<button class="select-option" type="button" role="option" aria-selected="false" data-value="${escapeHtml(item.id)}" data-price="${item.price || 0}"><span>${escapeHtml(item.name)}</span>${priceStr}</button>`
       }).join('')
     }
   }
@@ -198,8 +199,10 @@
       const option = event.target.closest('.select-option')
       if (!option) return
       const value = option.dataset.value
+      const price = option.dataset.price
       const label = option.querySelector('span')?.textContent || option.textContent
       $('#service-select').value = value
+      $('#service-select').dataset.price = price
       searchInput.value = label
       options.hidden = true
       dropdown.classList.remove('is-open')
@@ -226,46 +229,11 @@
     input.value = current
   })
 
-  // Existing dropdown setup for auth mode
-  function closeDropdowns() { document.querySelectorAll('.custom-select:not(#service-dropdown)').forEach(dropdown => { dropdown.classList.remove('is-open'); dropdown.querySelector('.select-options').hidden = true; dropdown.querySelector('.select-trigger')?.setAttribute('aria-expanded', 'false') }) }
-  function selectValue(dropdown, value, label) { const input = dropdown.querySelector('input[type="hidden"]'); if (input) input.value = value; const trigger = dropdown.querySelector('.select-trigger'); if (trigger) { const span = trigger.querySelector('span:first-child'); if (span) span.textContent = label; } dropdown.querySelectorAll('.select-option').forEach(option => { const selected = option.dataset.value === String(value); option.classList.toggle('is-selected', selected); option.setAttribute('aria-selected', String(selected)) }); closeDropdowns(); dropdown.dispatchEvent(new CustomEvent('selectionchange', { bubbles: true, detail: { value, label } })) }
-  function setupDropdown(dropdown) { const trigger = dropdown.querySelector('.select-trigger'); const options = dropdown.querySelector('.select-options'); if (!trigger || !options) return; trigger.addEventListener('click', () => { if (trigger.disabled) return; const isOpen = dropdown.classList.toggle('is-open'); options.hidden = !isOpen; trigger.setAttribute('aria-expanded', String(isOpen)) }); options.addEventListener('click', (event) => { const option = event.target.closest('.select-option'); if (option) selectValue(dropdown, option.dataset.value, option.textContent) }) }
-  document.querySelectorAll('.custom-select:not(#service-dropdown)').forEach(setupDropdown)
-  document.addEventListener('click', (event) => { if (!event.target.closest('.custom-select')) closeDropdowns() })
-
-  $('#connect-button').addEventListener('click', async () => {
-    const button = $('#connect-button')
-    const connection = config()
-    if (!connection.apiKey) return message('Masukkan API key terlebih dahulu.')
-    busy(button, true, 'Menghubungkan…')
-    try {
-      const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: connection }), call('/api/otp/balance', { providerConfig: connection })])
-      state.config = connection
-      state.services = services.services
-      saveStoredConfig(connection)
-      $('#revoke-button').hidden = false
-      const searchInput = $('#service-search')
-      searchInput.disabled = !state.services.length
-      searchInput.placeholder = state.services.length ? `Cari di ${state.services.length} layanan...` : 'Tidak ada layanan'
-      renderServiceOptions()
-      $('#order-button').disabled = !state.services.length
-      $('#balance-box').hidden = false
-      $('#deposit-btn').hidden = false
-      $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available)
-      status(`${state.services.length} layanan aktif`, 'is-success')
-      message('Provider & API Key berhasil tersimpan.', 'success')
-    } catch (error) {
-      status('Koneksi gagal', 'is-failed')
-      message(error.message)
-    } finally {
-      busy(button, false)
-    }
-  })
-
   // Multi-Order Support
   $('#order-button').addEventListener('click', async () => {
-    if (!state.config) return message('Hubungkan provider terlebih dahulu di Pengaturan.')
+    if (!state.user) return message('Silakan login terlebih dahulu.')
     const serviceId = $('#service-select').value
+    const price = Number($('#service-select').dataset.price || 0)
     if (!serviceId) return message('Silakan pilih layanan terlebih dahulu.')
     const qty = parseInt($('#order-qty').value || '1', 10)
     const button = $('#order-button')
@@ -280,13 +248,14 @@
     try {
       for (let i = 0; i < qty; i++) {
         try {
-          const res = await call('/api/otp/order', { providerConfig: state.config, serviceId })
+          const res = await call('/api/otp/order', { serviceId, price })
           const orderObj = {
             token: res.token,
             order_id: res.order_id,
             number: res.number,
             service_id: serviceId,
             service_name: serviceName,
+            price,
             status: 'WAITING',
             otp_code: null,
             expireTime: Date.now() + 15 * 60 * 1000
@@ -295,6 +264,9 @@
           renderOrders()
           addHistoryEntry(orderObj, 'WAITING')
           createdCount++
+          
+          // Refresh User Balance from Auth Me
+          refreshUserData()
 
           // Auto Shopee Check & Auto Cancel per order
           if (isShopee && autoCancel && res.number) {
@@ -302,10 +274,11 @@
               try {
                 const checkRes = await call('/api/shopee/check', { phone: res.number })
                 if (checkRes.registered) {
-                  await call('/api/otp/action', { providerConfig: state.config, orderRef: res.order_id, action: 'cancel' })
+                  await call('/api/otp/action', { orderRef: res.order_id, action: 'cancel', price })
                   orderObj.status = 'CANCELLED'
                   renderOrders()
                   addHistoryEntry(orderObj, 'CANCELLED')
+                  refreshUserData()
                   message(`Nomor ${res.number} terdaftar Shopee — dibatalkan otomatis.`)
                 } else if (checkRes.available) {
                   message(`Nomor ${res.number} aman (belum terdaftar Shopee).`, 'success')
@@ -340,7 +313,7 @@
       const btn = event.target.closest('.btn-check-card')
       busy(btn, true, 'Cek…')
       try {
-        const data = await call('/api/otp/check', { providerConfig: state.config, token: order.token })
+        const data = await call('/api/otp/check', { token: order.token })
         order.status = data.status
         order.otp_code = data.otp_code
         renderOrders()
@@ -349,16 +322,17 @@
         else message('Kode belum tersedia.')
       } catch (err) { message(err.message) } finally { busy(btn, false) }
     } else if (event.target.closest('.btn-cancel-card')) {
-      const yes = await showConfirm('Batalkan Order?', `Nomor ${order.number} akan dibatalkan.`)
+      const yes = await showConfirm('Batalkan Order?', `Nomor ${order.number} akan dibatalkan. Saldo akan dikembalikan.`)
       if (!yes) return
       const btn = event.target.closest('.btn-cancel-card')
       busy(btn, true, 'Batal…')
       try {
-        await call('/api/otp/action', { providerConfig: state.config, orderRef: order.order_id, action: 'cancel' })
+        await call('/api/otp/action', { orderRef: order.order_id, action: 'cancel', price: order.price || 0 })
         order.status = 'CANCELLED'
         renderOrders()
         addHistoryEntry(order, 'CANCELLED')
-        message('Order dibatalkan.', 'success')
+        refreshUserData()
+        message('Order dibatalkan. Saldo telah dikembalikan.', 'success')
       } catch (err) { message(err.message) } finally { busy(btn, false) }
     }
   })
@@ -372,7 +346,7 @@
     try {
       for (const order of waitingOrders) {
         try {
-          const data = await call('/api/otp/check', { providerConfig: state.config, token: order.token })
+          const data = await call('/api/otp/check', { token: order.token })
           order.status = data.status
           order.otp_code = data.otp_code
           addHistoryEntry(order, data.status)
@@ -383,8 +357,6 @@
     } finally { busy(btn, false) }
   })
 
-  $('#reveal-key').addEventListener('click', () => { const input = $('#api-key'); input.type = input.type === 'password' ? 'text' : 'password'; $('#reveal-key').textContent = input.type === 'password' ? 'Tampilkan' : 'Sembunyikan' })
-  $('#auth-dropdown').addEventListener('selectionchange', () => { $('#header-field').hidden = $('#auth-mode').value !== 'x-api-key' })
   $('.nav-list').addEventListener('click', (event) => { const button = event.target.closest('.nav-link'); if (!button) return; document.querySelectorAll('.nav-link').forEach(x => x.classList.toggle('is-active', x === button)); const view = button.dataset.view; document.querySelectorAll('.view-panel').forEach(x => x.hidden = x.id !== `${view}-view`); $('#page-title').textContent = view === 'dashboard' ? 'Ringkasan aktivitas' : view === 'checker' ? 'Shopee Number Checker' : view === 'activity' ? 'Aktivitas terbaru' : 'Pengaturan tampilan' })
 
   // Shopee Checker
@@ -428,67 +400,148 @@
   document.querySelectorAll('[data-theme-choice]').forEach(button => button.addEventListener('click', () => setTheme(button.dataset.themeChoice)))
   systemDark.addEventListener('change', () => { if (localStorage.getItem(themeKey) === 'system') setTheme('system') })
 
-  const STORAGE_KEY = 'otp_provider_config'
-  function saveStoredConfig(cfg) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)) } catch {} }
-  function getStoredConfig() { try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : null } catch { return null } }
-  function removeStoredConfig() { try { localStorage.removeItem(STORAGE_KEY) } catch {} }
+  // ── AUTHENTICATION & LOGIN/REGISTER MODAL LOGIC ──
+  let isRegisterMode = false
 
-  async function autoConnect(saved) {
-    if (!saved || !saved.apiKey) return
-    $('#api-key').value = saved.apiKey
-    if (saved.authMode) selectValue($('#auth-dropdown'), saved.authMode, saved.authMode === 'x-api-key' ? 'x-api-key header' : 'Bearer token')
-    if (saved.apiKeyHeader) $('#header-name').value = saved.apiKeyHeader
-    $('#revoke-button').hidden = false
-
-    try {
-      const [services, balance] = await Promise.all([call('/api/otp/services', { providerConfig: saved }), call('/api/otp/balance', { providerConfig: saved })])
-      state.config = saved
-      state.services = services.services
-      const searchInput = $('#service-search')
-      searchInput.disabled = !state.services.length
-      searchInput.placeholder = state.services.length ? `Cari di ${state.services.length} layanan...` : 'Tidak ada layanan'
-      renderServiceOptions()
-      $('#order-button').disabled = !state.services.length
-      $('#balance-box').hidden = false
-      $('#deposit-btn').hidden = false
-      $('#balance-value').textContent = new Intl.NumberFormat('id-ID').format(balance.available)
-      status(`${state.services.length} layanan aktif`, 'is-success')
-    } catch (error) {
-      status('Tersimpan (Koneksi Gagal)', 'is-failed')
+  function toggleAuthModal(show = true) {
+    const modal = $('#auth-modal')
+    if (show) {
+      modal.hidden = false
+      requestAnimationFrame(() => modal.classList.add('is-visible'))
+    } else {
+      modal.classList.remove('is-visible')
+      setTimeout(() => { modal.hidden = true }, 180)
     }
   }
 
-  $('#header-field').hidden = true; setTheme(); refreshMetrics(); renderHistory()
-  const savedConfig = getStoredConfig()
-  if (savedConfig) autoConnect(savedConfig)
+  $('#auth-switch-btn')?.addEventListener('click', () => {
+    isRegisterMode = !isRegisterMode
+    $('#auth-form-title').textContent = isRegisterMode ? 'Daftar Akun Baru' : 'Masuk ke OTP Uyeee'
+    $('#auth-form-desc').textContent = isRegisterMode ? 'Buat akun baru untuk mulai memesan OTP instan.' : 'Masukkan email & password akun Anda untuk melanjutkan.'
+    $('#auth-submit-btn').textContent = isRegisterMode ? 'Daftar Sekarang' : 'Masuk Sekarang'
+    $('#auth-switch-btn').textContent = isRegisterMode ? 'Sudah punya akun? Login disini' : 'Belum punya akun? Daftar disini'
+    $('#remember-me-label').style.display = isRegisterMode ? 'none' : 'flex'
+  })
 
-  $('#revoke-button').addEventListener('click', async () => {
-    const yes = await showConfirm('Hapus API Key?', 'API key akan dihapus dari browser ini.')
+  $('#auth-submit-btn')?.addEventListener('click', async () => {
+    const email = $('#auth-email').value.trim()
+    const password = $('#auth-password').value.trim()
+    const rememberMe = $('#auth-remember').checked
+
+    if (!email || !password) return message('Email dan password wajib diisi.')
+    if (password.length < 6) return message('Password minimal 6 karakter.')
+
+    const button = $('#auth-submit-btn')
+    busy(button, true, isRegisterMode ? 'Mendaftar...' : 'Memproses...')
+
+    try {
+      const path = isRegisterMode ? '/api/auth/register' : '/api/auth/login'
+      const res = await call(path, { email, password, rememberMe })
+      state.user = res.user
+      toggleAuthModal(false)
+      message(isRegisterMode ? 'Pendaftaran berhasil!' : 'Berhasil masuk ke akun.', 'success')
+      await initUserSession()
+    } catch (err) {
+      message(err.message)
+    } finally {
+      busy(button, false)
+    }
+  })
+
+  $('#logout-btn')?.addEventListener('click', async () => {
+    const yes = await showConfirm('Keluar Akun?', 'Anda harus login kembali untuk memesan OTP.')
     if (!yes) return
-    removeStoredConfig()
-    state.config = null
-    state.services = []
-    state.orders = []
-    renderOrders()
-    $('#api-key').value = ''
-    const searchInput = $('#service-search')
-    searchInput.disabled = true
-    searchInput.value = ''
-    searchInput.placeholder = 'Hubungkan provider di Pengaturan'
-    $('#service-select').value = ''
-    $('#service-options').innerHTML = ''
-    $('#order-button').disabled = true
-    $('#balance-box').hidden = true
-    $('#deposit-btn').hidden = true
-    $('#revoke-button').hidden = true
-    status('Belum terhubung', '')
-    message('API Key dihapus.', 'success')
+    try {
+      await call('/api/auth/logout', null)
+      state.user = null
+      state.orders = []
+      renderOrders()
+      location.reload()
+    } catch (e) {}
   })
 
-  // Deposit Logic - Redirect langsung ke Web Provider
+  async function refreshUserData() {
+    try {
+      const res = await call('/api/auth/me', null, 'GET')
+      if (res.user) {
+        state.user = res.user
+        $('#balance-value').textContent = `Rp ${Number(res.user.balance || 0).toLocaleString('id-ID')}`
+        $('#user-email-display').textContent = res.user.email
+      }
+    } catch (e) {}
+  }
+
+  async function initUserSession() {
+    try {
+      const res = await call('/api/auth/me', null, 'GET')
+      if (res.user) {
+        state.user = res.user
+        $('#user-profile-badge').style.display = 'flex'
+        $('#user-email-display').textContent = res.user.email
+        $('#balance-value').textContent = `Rp ${Number(res.user.balance || 0).toLocaleString('id-ID')}`
+        toggleAuthModal(false)
+
+        // Load Services List
+        const sRes = await call('/api/otp/services', null, 'GET')
+        state.services = sRes.services
+        const searchInput = $('#service-search')
+        searchInput.disabled = !state.services.length
+        searchInput.placeholder = state.services.length ? `Cari di ${state.services.length} layanan...` : 'Tidak ada layanan'
+        renderServiceOptions()
+        $('#order-button').disabled = !state.services.length
+      } else {
+        toggleAuthModal(true)
+      }
+    } catch (e) {
+      toggleAuthModal(true)
+    }
+  }
+
+  // ── DEPOSIT KODE UNIK QRIS LOGIC ──
   $('#deposit-btn')?.addEventListener('click', () => {
-    // Karena kita tidak tahu persis URL login user di web mereka,
-    // kita arahkan ke halaman utama atau dashboard mereka
-    window.open('https://dehuyzotp.shop/deposit', '_blank')
+    const modal = $('#deposit-modal')
+    $('#deposit-form-step').hidden = false
+    $('#deposit-qr-step').hidden = true
+    modal.hidden = false
+    requestAnimationFrame(() => modal.classList.add('is-visible'))
   })
+
+  $('#deposit-close-btn')?.addEventListener('click', () => {
+    const modal = $('#deposit-modal')
+    modal.classList.remove('is-visible')
+    setTimeout(() => { modal.hidden = true }, 180)
+  })
+
+  $('#deposit-create-btn')?.addEventListener('click', async () => {
+    const amount = $('#deposit-amount-input').value.trim()
+    if (!amount || isNaN(amount) || Number(amount) < 5000) {
+      return message('Minimal isi saldo Rp 5.000')
+    }
+    const button = $('#deposit-create-btn')
+    busy(button, true, 'Memproses...')
+    try {
+      const res = await call('/api/deposit/create', { amount: Number(amount) })
+      const dep = res.deposit
+
+      $('#deposit-qr-img').src = dep.qr_image
+      $('#dep-base-val').textContent = `Rp ${Number(dep.base_amount).toLocaleString('id-ID')}`
+      $('#dep-code-val').textContent = `+ Rp ${dep.unique_code}`
+      $('#dep-total-val').textContent = `Rp ${Number(dep.total_pay).toLocaleString('id-ID')}`
+      $('#deposit-note-text').textContent = dep.note
+
+      $('#deposit-form-step').hidden = true
+      $('#deposit-qr-step').hidden = false
+    } catch (err) {
+      message(err.message)
+    } finally {
+      busy(button, false)
+    }
+  })
+
+  $('#deposit-done-btn')?.addEventListener('click', () => {
+    message('Permintaan deposit telah dibuat. Saldo akan otomatis bertambah setelah transfer terkonfirmasi!', 'success')
+    $('#deposit-close-btn').click()
+  })
+
+  setTheme(); refreshMetrics(); renderHistory(); initUserSession()
 })()

@@ -8,10 +8,18 @@
     "build": "tsc"
   },
   "dependencies": {
-    "hono": "^4.13.5"
+    "@libsql/client": "^0.17.4",
+    "bcryptjs": "^3.0.3",
+    "cookie": "^2.0.1",
+    "hono": "^4.13.5",
+    "hono-sessions": "^0.8.1",
+    "jose": "^6.2.10"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie": "^0.6.0",
     "@types/node": "^22.0.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3"
   }
 }

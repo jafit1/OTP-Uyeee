@@ -1,13 +1,15 @@
 import { Hono } from 'hono'
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { renderer } from './renderer.js'
+import { db, initDb } from './db.js'
+import { hashPassword, comparePassword, createToken, verifyToken } from './auth.js'
 
-type ProviderConfig = {
-  apiKey?: string
-  authMode?: 'bearer' | 'x-api-key'
-  apiKeyHeader?: string
-}
+// Inisialisasi Database saat booting
+initDb().catch(console.error)
 
 const PROVIDER_BASE_URL = 'https://dehuyzotp.shop'
+const MASTER_API_KEY = process.env.PROVIDER_API_KEY || 'otpk_fbb504f27e0e357b6725dae255954934ac2d5e79bacdeb63' // Fallback / Master Key Admin
+
 const DEFAULT_ENDPOINTS = {
   services: '/api/services',
   balance: '/api/balance',
@@ -18,7 +20,13 @@ const DEFAULT_ENDPOINTS = {
   action: '/api/order/{id}',
 }
 
-const app = new Hono()
+type Env = {
+  Variables: {
+    user: { id: string; email: string; role: string }
+  }
+}
+
+const app = new Hono<Env>()
 app.use(renderer)
 
 function safePath(path: string) {
@@ -28,22 +36,12 @@ function safePath(path: string) {
   return path
 }
 
-function providerConfig(input: ProviderConfig = {}) {
-  const apiKey = String(input.apiKey || '').trim()
-  if (!apiKey) throw new Error('API key wajib diisi.')
-  return {
-    apiKey,
-    authMode: input.authMode === 'x-api-key' ? 'x-api-key' : 'bearer',
-    apiKeyHeader: String(input.apiKeyHeader || 'x-api-key').replace(/[^a-zA-Z0-9-]/g, '') || 'x-api-key',
-  }
-}
-
-async function requestProvider(config: ReturnType<typeof providerConfig>, path: string, options: RequestInit = {}) {
+async function requestProvider(path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers)
   headers.set('Accept', 'application/json')
   if (options.method && !['GET', 'DELETE'].includes(options.method)) headers.set('Content-Type', 'application/json')
-  if (config.authMode === 'x-api-key') headers.set(config.apiKeyHeader, config.apiKey)
-  else headers.set('Authorization', `Bearer ${config.apiKey}`)
+  headers.set('Authorization', `Bearer ${MASTER_API_KEY}`)
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 15000)
   try {
@@ -53,7 +51,7 @@ async function requestProvider(config: ReturnType<typeof providerConfig>, path: 
     try { data = text ? JSON.parse(text) : {} } catch {}
     if (!response.ok) {
       const detail = typeof data === 'object' && data ? JSON.stringify(data).slice(0, 240) : text.slice(0, 240)
-      throw new Error(response.status === 401 || response.status === 403 ? 'API key tidak valid.' : `Provider error (${response.status}). ${detail}`)
+      throw new Error(`Provider error (${response.status}). ${detail}`)
     }
     return data as Record<string, unknown>
   } catch (error) {
@@ -66,10 +64,87 @@ function apiError(error: unknown, status = 400) {
   return { success: false, error: error instanceof Error ? error.message : 'Terjadi kesalahan.', status }
 }
 
-app.post('/api/otp/services', async (c) => {
+// ── Middleware Autentikasi ──
+async function authMiddleware(c: any, next: any) {
+  const token = getCookie(c, 'auth_token')
+  if (!token) return c.json({ success: false, error: 'Sesi berakhir, silakan login kembali.' }, 401)
+  const user = await verifyToken(token)
+  if (!user) return c.json({ success: false, error: 'Token tidak valid, silakan login kembali.' }, 401)
+  c.set('user', user)
+  await next()
+}
+
+// ── Auth Endpoints ──
+app.post('/api/auth/register', async (c) => {
   try {
-    const body = await c.req.json<{ providerConfig?: ProviderConfig }>()
-    const raw = await requestProvider(providerConfig(body.providerConfig), DEFAULT_ENDPOINTS.services, { method: 'GET' })
+    const { email, password } = await c.req.json()
+    if (!email || !password || password.length < 6) {
+      return c.json({ success: false, error: 'Email valid & Password minimal 6 karakter wajib diisi.' }, 400)
+    }
+
+    const check = await db.execute({ sql: 'SELECT id FROM users WHERE email = ?', args: [email.toLowerCase().trim()] })
+    if (check.rows.length > 0) {
+      return c.json({ success: false, error: 'Email sudah terdaftar. Silakan login.' }, 400)
+    }
+
+    const id = 'usr_' + Math.random().toString(36).substring(2, 10)
+    const password_hash = await hashPassword(password)
+    
+    await db.execute({
+      sql: 'INSERT INTO users (id, email, password_hash, balance) VALUES (?, ?, ?, 0)',
+      args: [id, email.toLowerCase().trim(), password_hash]
+    })
+
+    const token = await createToken({ id, email: email.toLowerCase().trim(), role: 'user' }, true)
+    setCookie(c, 'auth_token', token, { path: '/', httpOnly: true, maxAge: 30 * 24 * 3600, sameSite: 'Lax' })
+
+    return c.json({ success: true, user: { id, email, balance: 0 } })
+  } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
+})
+
+app.post('/api/auth/login', async (c) => {
+  try {
+    const { email, password, rememberMe } = await c.req.json()
+    if (!email || !password) return c.json({ success: false, error: 'Email dan password wajib diisi.' }, 400)
+
+    const res = await db.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [email.toLowerCase().trim()] })
+    if (res.rows.length === 0) return c.json({ success: false, error: 'Email atau password salah.' }, 400)
+
+    const user = res.rows[0] as any
+    const valid = await comparePassword(password, user.password_hash)
+    if (!valid) return c.json({ success: false, error: 'Email atau password salah.' }, 400)
+
+    const token = await createToken({ id: user.id, email: user.email, role: user.role }, !!rememberMe)
+    setCookie(c, 'auth_token', token, {
+      path: '/',
+      httpOnly: true,
+      maxAge: rememberMe ? 30 * 24 * 3600 : 24 * 3600,
+      sameSite: 'Lax'
+    })
+
+    return c.json({ success: true, user: { id: user.id, email: user.email, balance: user.balance } })
+  } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
+})
+
+app.get('/api/auth/me', authMiddleware, async (c) => {
+  try {
+    const u = c.get('user')
+    const res = await db.execute({ sql: 'SELECT id, email, balance, role FROM users WHERE id = ?', args: [u.id] })
+    if (res.rows.length === 0) return c.json({ success: false, error: 'User tidak ditemukan.' }, 404)
+    const user = res.rows[0]
+    return c.json({ success: true, user })
+  } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
+})
+
+app.post('/api/auth/logout', async (c) => {
+  deleteCookie(c, 'auth_token')
+  return c.json({ success: true })
+})
+
+// ── OTP Services Endpoints (Memakai Saldo DB User) ──
+app.get('/api/otp/services', async (c) => {
+  try {
+    const raw = await requestProvider(DEFAULT_ENDPOINTS.services, { method: 'GET' })
     const items = Array.isArray(raw) ? raw : Array.isArray(raw.services) ? raw.services : Array.isArray(raw.data) ? raw.data : []
     const services = items.map((item: any, index) => ({
       id: String(item?.id ?? item?.service_id ?? item?.code ?? index + 1),
@@ -81,38 +156,49 @@ app.post('/api/otp/services', async (c) => {
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
 
-app.post('/api/otp/balance', async (c) => {
+app.post('/api/otp/order', authMiddleware, async (c) => {
   try {
-    const body = await c.req.json<{ providerConfig?: ProviderConfig }>()
-    const raw = await requestProvider(providerConfig(body.providerConfig), DEFAULT_ENDPOINTS.balance, { method: 'GET' })
-    const balance = Number(raw.balance ?? 0)
-    const reserved = Number(raw.reserved ?? 0)
-    return c.json({ success: true, balance, reserved, available: Number(raw.available ?? balance - reserved) })
-  } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
-})
-
-app.post('/api/otp/order', async (c) => {
-  try {
-    const body = await c.req.json<{ providerConfig?: ProviderConfig; serviceId?: string }>()
+    const user = c.get('user')
+    const body = await c.req.json<{ serviceId?: string; price?: number }>()
     if (!body.serviceId) return c.json({ success: false, error: 'Pilih layanan.' }, 400)
+
+    // Cek saldo user di database
+    const uRes = await db.execute({ sql: 'SELECT balance FROM users WHERE id = ?', args: [user.id] })
+    const currentBalance = Number(uRes.rows[0]?.balance || 0)
+    const price = Number(body.price || 0)
+
+    if (currentBalance < price) {
+      return c.json({ success: false, error: `Saldo tidak mencukupi (Butuh Rp ${price.toLocaleString('id-ID')}, Saldo Anda Rp ${currentBalance.toLocaleString('id-ID')}). Silakan deposit terlebih dahulu.` }, 400)
+    }
+
     const service_id = isNaN(Number(body.serviceId)) ? body.serviceId : Number(body.serviceId)
-    const raw = await requestProvider(providerConfig(body.providerConfig), DEFAULT_ENDPOINTS.order, {
+    const raw = await requestProvider(DEFAULT_ENDPOINTS.order, {
       method: 'POST',
       body: JSON.stringify({ service_id, service: service_id })
     })
     const token = String(raw.token || raw.id || '')
     const number = String(raw.phone || raw.number || '')
-    if (!token || !number) throw new Error(String(raw.message || raw.error || 'Respons tidak lengkap.'))
+    if (!token || !number) throw new Error(String(raw.message || raw.error || 'Respons provider tidak lengkap.'))
+
+    // Potong Saldo User & Catat Transaksi
+    if (price > 0) {
+      await db.execute({ sql: 'UPDATE users SET balance = balance - ? WHERE id = ?', args: [price, user.id] })
+      await db.execute({
+        sql: 'INSERT INTO transactions (id, user_id, amount, type, status, reference) VALUES (?, ?, ?, ?, ?, ?)',
+        args: ['tx_' + Math.random().toString(36).substring(2, 10), user.id, -price, 'ORDER', 'SUCCESS', token]
+      })
+    }
+
     return c.json({ success: true, token, order_id: raw.order_id || token, number, service_id: body.serviceId, status: 'WAITING', expires_at: raw.expires_at || null })
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
 
-app.post('/api/otp/check', async (c) => {
+app.post('/api/otp/check', authMiddleware, async (c) => {
   try {
-    const body = await c.req.json<{ providerConfig?: ProviderConfig; token?: string }>()
+    const body = await c.req.json<{ token?: string }>()
     if (!body.token) return c.json({ success: false, error: 'Token tidak ditemukan.' }, 400)
     const path = DEFAULT_ENDPOINTS.check.replace('{token}', encodeURIComponent(body.token))
-    const raw = await requestProvider(providerConfig(body.providerConfig), path, { method: 'GET' })
+    const raw = await requestProvider(path, { method: 'GET' })
     const otp = raw.otp ? String(raw.otp) : null
     const state = String(raw.state || '').toLowerCase()
     const status = otp || ['success', 'received', 'done'].includes(state) ? 'RECEIVED' : ['cancel', 'cancelled', 'failed', 'expired'].includes(state) ? 'FAILED' : 'WAITING'
@@ -120,22 +206,64 @@ app.post('/api/otp/check', async (c) => {
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
 
-app.post('/api/otp/action', async (c) => {
+app.post('/api/otp/action', authMiddleware, async (c) => {
   try {
-    const body = await c.req.json<{ providerConfig?: ProviderConfig; orderRef?: string; action?: string }>()
+    const user = c.get('user')
+    const body = await c.req.json<{ orderRef?: string; action?: string; price?: number }>()
     if (!body.orderRef || !['done', 'cancel'].includes(String(body.action))) return c.json({ success: false, error: 'Order/aksi tidak valid.' }, 400)
     const path = DEFAULT_ENDPOINTS.action.replace('{id}', encodeURIComponent(body.orderRef))
-    const raw = await requestProvider(providerConfig(body.providerConfig), path, { method: 'POST', body: JSON.stringify({ action: body.action }) })
+    const raw = await requestProvider(path, { method: 'POST', body: JSON.stringify({ action: body.action }) })
+
+    // Refund Saldo jika Cancel
+    if (body.action === 'cancel' && body.price) {
+      const price = Number(body.price)
+      await db.execute({ sql: 'UPDATE users SET balance = balance + ? WHERE id = ?', args: [price, user.id] })
+      await db.execute({
+        sql: 'INSERT INTO transactions (id, user_id, amount, type, status, reference) VALUES (?, ?, ?, ?, ?, ?)',
+        args: ['tx_' + Math.random().toString(36).substring(2, 10), user.id, price, 'REFUND', 'SUCCESS', body.orderRef]
+      })
+    }
+
     return c.json({ success: true, action: body.action, refunded: Number(raw.refunded || 0) })
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
 
-// Cloudflare Worker proxy URL (set di Vercel env: SHOPEE_PROXY_URL)
-// Contoh: https://shopee-proxy.username.workers.dev
-const SHOPEE_PROXY_URL = process.env.SHOPEE_PROXY_URL || ''
+// ── Deposit QRIS Dengan Kode Unik ──
+app.post('/api/deposit/create', authMiddleware, async (c) => {
+  try {
+    const user = c.get('user')
+    const { amount } = await c.req.json()
+    const baseAmount = Number(amount)
+    if (isNaN(baseAmount) || baseAmount < 5000) {
+      return c.json({ success: false, error: 'Minimal deposit Rp 5.000' }, 400)
+    }
 
-// Telegram Bot Checker API URL (set di Vercel env: TELEGRAM_CHECKER_URL)
-// Contoh: https://your-domain.com (via Cloudflare Tunnel)
+    // Buat 3-digit kode unik (misal: 1 - 999)
+    const uniqueCode = Math.floor(Math.random() * 999) + 1
+    const totalPay = baseAmount + uniqueCode
+    const txId = 'dep_' + Math.random().toString(36).substring(2, 10)
+
+    await db.execute({
+      sql: 'INSERT INTO transactions (id, user_id, amount, type, status, reference) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [txId, user.id, totalPay, 'DEPOSIT', 'PENDING', `QRIS-UNIK-${uniqueCode}`]
+    })
+
+    return c.json({
+      success: true,
+      deposit: {
+        id: txId,
+        base_amount: baseAmount,
+        unique_code: uniqueCode,
+        total_pay: totalPay,
+        qr_image: 'https://i.ibb.co.com/84NswyQG/QRIS-Admin.png', // QRIS DANA Bisnis Admin
+        note: `Transfer tepat sebesar Rp ${totalPay.toLocaleString('id-ID')} agar sistem otomatis mengenali transfer Anda!`
+      }
+    })
+  } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
+})
+
+// ── Shopee Checker APIs ──
+const SHOPEE_PROXY_URL = process.env.SHOPEE_PROXY_URL || ''
 const TELEGRAM_CHECKER_URL = process.env.TELEGRAM_CHECKER_URL || ''
 
 function shopeeHeaders() {
@@ -153,140 +281,64 @@ function shopeeHeaders() {
 
 async function shopeeCheckDirect(national: string, intl: string) {
   const headers = shopeeHeaders()
-  // Strategy 1: check_phone_number_registered
   try {
     const res = await fetch('https://shopee.co.id/api/v4/account/check_phone_number_registered', {
-      method: 'POST', headers,
-      body: JSON.stringify({ phone_number: intl }),
+      method: 'POST', headers, body: JSON.stringify({ phone: national })
     })
-    const t = await res.text()
-    let d: any = {}; try { d = JSON.parse(t) } catch {}
-    if (d && d.error !== 'error_not_found' && d.error !== undefined) {
-      return { registered: d?.data?.is_registered === true, available: d?.data?.is_registered === false && d.error === 0, raw: d, source: 'check_phone' }
+    if (res.ok) {
+      const data = await res.json()
+      if (data && typeof data.error === 'number') {
+        const isReg = data.error === 0 || data.data?.is_registered === true
+        return { registered: isReg, available: !isReg, status_text: isReg ? 'TERDAFTAR' : 'BELUM TERDAFTAR', detail: 'Direct API v4' }
+      }
     }
   } catch {}
-
-  // Strategy 2: request_otp (check without sending - only if proxy available, skip direct)
-  // Strategy 3: get_account_info_by_phone
-  try {
-    const res = await fetch('https://shopee.co.id/api/v4/account/basic/get_account_info_by_phone', {
-      method: 'POST', headers,
-      body: JSON.stringify({ phone: national, phone_number: intl }),
-    })
-    const t = await res.text()
-    let d: any = {}; try { d = JSON.parse(t) } catch {}
-    if (d && d.error !== 'error_not_found') {
-      const isReg = d.data?.userid > 0 || d.data?.user_id > 0 || d.data?.is_registered === true || d.data?.username
-      return { registered: !!isReg, available: !isReg && d.error === 0, raw: d, source: 'get_account_info' }
-    }
-  } catch {}
-
-  // Strategy 4: wallet transfer lookup
-  try {
-    const res = await fetch('https://shopee.co.id/api/v4/wallet/transfer/check_user_by_phone', {
-      method: 'POST', headers,
-      body: JSON.stringify({ phone: national }),
-    })
-    const t = await res.text()
-    let d: any = {}; try { d = JSON.parse(t) } catch {}
-    if (d && d.error !== 'error_not_found') {
-      const isReg = d.data?.userid > 0 || d.data?.user_id > 0 || d.data?.is_registered === true
-      return { registered: !!isReg, available: !isReg && d.error === 0, raw: d, source: 'wallet_check' }
-    }
-  } catch {}
-
   return null
 }
 
 app.post('/api/shopee/check', async (c) => {
   try {
     const body = await c.req.json<{ phone?: string }>()
-    let rawPhone = String(body.phone || '').trim().replace(/[^0-9]/g, '')
-    if (!rawPhone) return c.json({ success: false, error: 'Nomor telepon tidak boleh kosong.' }, 400)
-
-    let national = rawPhone
+    const raw = String(body.phone || '').trim().replace(/[^0-9]/g, '')
+    if (!raw || raw.length < 8) return c.json({ success: false, error: 'Nomor telepon tidak valid.' }, 400)
+    let national = raw
     if (national.startsWith('62')) national = '0' + national.slice(2)
+    const intl = national.startsWith('0') ? '62' + national.slice(1) : national
 
-    let intl = rawPhone
-    if (intl.startsWith('0')) intl = '62' + intl.slice(1)
-    if (!intl.startsWith('62')) intl = '62' + intl
-
-    // Strategy 1: Telegram Bot Checker (paling akurat, bypass semua anti-bot)
     if (TELEGRAM_CHECKER_URL) {
       try {
-        const tgRes = await fetch(`${TELEGRAM_CHECKER_URL}/check`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone: national }),
-          signal: AbortSignal.timeout(35000),
+        const res = await fetch(`${TELEGRAM_CHECKER_URL.replace(/\/$/, '')}/check`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: national })
         })
-        if (tgRes.ok) {
-          const tgData = await tgRes.json() as any
-          if (tgData?.success) {
-            return c.json({
-              success: true,
-              phone: tgData.phone || intl,
-              registered: tgData.registered,
-              available: tgData.available,
-              status_text: tgData.status_text,
-              detail: tgData.detail || '',
-              source: 'telegram_bot',
-              raw: tgData.raw,
-            })
-          }
+        if (res.ok) {
+          const data = await res.json()
+          return c.json({ success: true, phone: national, registered: data.registered, available: data.available, status_text: data.status_text, detail: `Telegram Bot (${data.detail || ''})` })
         }
       } catch {}
     }
 
-    // Strategy 2: Try Cloudflare Worker proxy (IP CDN tidak diblokir Shopee)
-    if (SHOPEE_PROXY_URL) {
-      try {
-        const proxyRes = await fetch(SHOPEE_PROXY_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone: national }),
-          signal: AbortSignal.timeout(10000),
-        })
-        if (proxyRes.ok) {
-          const proxyData = await proxyRes.json() as any
-          if (proxyData?.success && proxyData?.source !== 'all_failed') {
-            return c.json(proxyData)
-          }
-        }
-      } catch {}
-    }
-
-    // Strategy 3: Direct check (mungkin berhasil dari IP tertentu)
     const direct = await shopeeCheckDirect(national, intl)
-    if (direct) {
-      return c.json({
-        success: true,
-        phone: intl,
-        registered: direct.registered,
-        available: direct.available,
-        status_text: direct.registered ? 'TERDAFTAR (UNAVAILABLE)' : direct.available ? 'BELUM TERDAFTAR (AVAILABLE)' : 'STATUS UNKNOWN',
-        source: direct.source,
-        raw: direct.raw,
-      })
-    }
+    if (direct) return c.json({ success: true, phone: national, ...direct })
 
-    // Strategy 4: All failed - report as CAPTCHA/blocked
-    return c.json({
-      success: true,
-      phone: intl,
-      registered: false,
-      available: false,
-      status_text: 'CAPTCHA / ANTI-BOT - Shopee memblokir server. Setup Telegram Checker untuk fix.',
-      source: 'all_failed',
-    })
-  } catch (error) {
-    const result = apiError(error)
-    return c.json(result, result.status as 400)
-  }
+    return c.json({ success: false, error: 'Layanan Shopee Checker sedang tidak dapat diakses.' }, 500)
+  } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
 
-app.get('/', (c) => c.render(
-  <main class="app-shell">
+// ── HTML RENDERER UI DENGAN MODAL LOGIN/REGISTER ──
+app.get('*', (c) => {
+  return c.html(`
+<!DOCTYPE html>
+<html lang="id" data-theme="system">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OTP Uyeee — Platform Verifikasi Kode OTP Instan</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+</head>
+<body>
+  <div id="app" class="app-shell">
     <aside class="sidebar" aria-label="Navigasi utama">
       <a class="brand" href="#dashboard" aria-label="OTP Uyeee Dashboard"><span class="brand-mark">O</span><span class="brand-name">OTP Uyeee</span></a>
       <nav class="nav-list">
@@ -295,17 +347,102 @@ app.get('/', (c) => c.render(
         <button class="nav-link" data-icon="◷" data-tooltip="Aktivitas" aria-label="Aktivitas" data-view="activity"><span class="nav-label">Aktivitas</span></button>
         <button class="nav-link" data-icon="⚙" data-tooltip="Pengaturan" aria-label="Pengaturan" data-view="settings"><span class="nav-label">Pengaturan</span></button>
       </nav>
-      <div class="sidebar-footer"><span class="live-dot"></span> Sistem siap digunakan</div>
+      <div class="sidebar-footer"><span class="live-dot"></span> Sistem Siap</div>
     </aside>
     <section class="workspace">
-      <header class="topbar"><div><p class="eyebrow">PUSAT VERIFIKASI</p><h1 id="page-title">Ringkasan aktivitas</h1></div><div class="topbar-actions"><span id="connection-status" class="status-pill">Belum terhubung</span><button id="theme-toggle" class="icon-button" type="button" aria-label="Ganti tema">☾</button></div></header>
+      <header class="topbar">
+        <div><p class="eyebrow">PUSAT VERIFIKASI</p><h1 id="page-title">Ringkasan aktivitas</h1></div>
+        <div class="topbar-actions">
+          <div id="user-profile-badge" style="display:none; align-items:center; gap:8px;">
+            <span id="user-email-display" class="status-pill" style="font-weight:700;">user@example.com</span>
+            <button id="logout-btn" class="icon-button" type="button" title="Keluar Akun">🚪</button>
+          </div>
+          <button id="theme-toggle" class="icon-button" type="button" aria-label="Ganti tema">☾</button>
+        </div>
+      </header>
+      
       <div id="notification-modal" class="notification-modal" role="presentation" hidden><section class="notification-card"><span id="notification-icon" class="notification-icon">!</span><p id="notification-text" class="notification-text"></p><button id="notification-close" class="notification-close" type="button" aria-label="Tutup">×</button></section></div>
       <div id="confirm-overlay" class="confirm-overlay" hidden><div class="confirm-box"><h3 id="confirm-title">Konfirmasi</h3><p id="confirm-text"></p><div class="confirm-actions"><button id="confirm-cancel" class="confirm-cancel" type="button">Batal</button><button id="confirm-ok" class="confirm-ok" type="button">Ya, Batalkan</button></div></div></div>
+      
+      <!-- AUTH MODAL / OVERLAY (LOGIN & REGISTER) -->
+      <div id="auth-modal" class="confirm-overlay" style="z-index:99999;">
+        <div class="confirm-box" style="max-width:380px;">
+          <h3 id="auth-form-title">Masuk ke OTP Uyeee</h3>
+          <p id="auth-form-desc" class="muted" style="margin-bottom:15px; font-size:12px;">Masukkan email & password akun Anda untuk melanjutkan.</p>
+          
+          <div id="auth-fields">
+            <label class="field-label" style="margin-top:0;">Email</label>
+            <input id="auth-email" type="email" placeholder="nama@email.com" autocomplete="email" style="margin-bottom:10px;" />
+            
+            <label class="field-label" style="margin-top:0;">Password</label>
+            <input id="auth-password" type="password" placeholder="Minimal 6 karakter" autocomplete="current-password" style="margin-bottom:12px;" />
+            
+            <label id="remember-me-label" class="field-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:0; margin-bottom:15px;">
+              <input id="auth-remember" type="checkbox" checked style="width:auto;" />
+              <span>Ingat Saya (30 Hari)</span>
+            </label>
+          </div>
+          
+          <div class="confirm-actions" style="flex-direction:column; gap:8px;">
+            <button id="auth-submit-btn" class="button button-primary" type="button" style="margin:0;">Masuk Sekarang</button>
+            <button id="auth-switch-btn" class="button button-quiet" type="button" style="margin:0; font-size:11px;">Belum punya akun? Daftar disini</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- DEPOSIT QRIS KODE UNIK MODAL -->
+      <div id="deposit-modal" class="confirm-overlay" hidden>
+        <div class="confirm-box" style="max-width:400px;">
+          <h3>Isi Saldo (QRIS Kode Unik)</h3>
+          <p class="muted" style="margin-bottom:15px; font-size:12px;">Transfer pas sesuai total harga hingga digit terakhir agar otomatis terverifikasi.</p>
+          
+          <div id="deposit-form-step">
+            <label class="field-label" style="margin-top:0;">Nominal Isi Saldo (Rp)</label>
+            <input id="deposit-amount-input" type="number" placeholder="Minimal 5000" style="margin-bottom:15px;" />
+            <div class="confirm-actions">
+              <button id="deposit-close-btn" class="confirm-cancel" type="button">Batal</button>
+              <button id="deposit-create-btn" class="button button-primary" type="button" style="margin:0;">Buat QRIS Kode Unik</button>
+            </div>
+          </div>
+
+          <div id="deposit-qr-step" hidden>
+            <div style="background:#fff; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;">
+              <img id="deposit-qr-img" src="" alt="QRIS" style="width:100%; max-width:200px; margin:0 auto; border-radius:8px; display:block;" />
+              <p style="margin-top:10px; font-size:11px; color:#162033; font-weight:700;">QRIS DANA / ALL PAYMENT</p>
+            </div>
+            
+            <div style="background:var(--surface-soft); padding:12px; border-radius:8px; font-size:12px; margin-bottom:15px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Nominal Deposit:</span><span id="dep-base-val">Rp 0</span></div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:var(--brand);"><span>Kode Unik Verifikasi:</span><strong id="dep-code-val">+0</strong></div>
+              <hr style="margin:8px 0; border-color:var(--line);" />
+              <div style="display:flex; justify-content:space-between; font-size:14px; font-weight:800;"><span>TOTAL DIBAYAR:</span><strong id="dep-total-val" style="color:var(--success);">Rp 0</strong></div>
+            </div>
+
+            <p id="deposit-note-text" style="font-size:11px; color:var(--waiting); margin-bottom:15px; font-weight:600; text-align:center;"></p>
+            <div class="confirm-actions">
+              <button id="deposit-done-btn" class="button button-primary" type="button" style="margin:0;">Saya Sudah Transfer</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DASHBOARD VIEW -->
       <section id="dashboard-view" class="view-panel">
-        <section class="metrics" aria-label="Statistik order"><article class="metric-card"><span>Total order</span><strong id="metric-total">0</strong><small>Dalam sesi ini</small></article><article class="metric-card"><span>Berhasil</span><strong id="metric-success">0</strong><small>Kode telah diterima</small></article><article class="metric-card"><span>Menunggu</span><strong id="metric-waiting">0</strong><small>Perlu ditindaklanjuti</small></article></section>
+        <section class="metrics" aria-label="Statistik order">
+          <article class="metric-card"><span>Total order</span><strong id="metric-total">0</strong><small>Dalam sesi ini</small></article>
+          <article class="metric-card"><span>Berhasil</span><strong id="metric-success">0</strong><small>Kode telah diterima</small></article>
+          <article class="metric-card"><span>Menunggu</span><strong id="metric-waiting">0</strong><small>Perlu ditindaklanjuti</small></article>
+        </section>
+
         <div class="content-grid">
           <section class="panel order-panel">
-            <div class="panel-heading"><div><p class="eyebrow">ORDER LAYANAN</p><h2>Pilih Layanan</h2></div><div style="display:flex; align-items:center; gap:8px;"><div id="balance-box" class="balance-box-pill" hidden><span>Saldo:</span> <strong id="balance-value">—</strong></div><button id="deposit-btn" class="button button-primary" style="margin:0; padding:4px 10px; font-size:11px; min-height:28px; width:auto;" hidden>+ Deposit</button></div></div>
+            <div class="panel-heading">
+              <div><p class="eyebrow">ORDER LAYANAN</p><h2>Pilih Layanan</h2></div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div id="balance-box" class="balance-box-pill"><span>Saldo:</span> <strong id="balance-value">Rp 0</strong></div>
+                <button id="deposit-btn" class="button button-primary" style="margin:0; padding:4px 10px; font-size:11px; min-height:28px; width:auto;">+ Deposit</button>
+              </div>
+            </div>
             <p class="muted">Pilih aplikasi/layanan yang ingin Anda dapatkan nomor OTP-nya.</p>
             <div id="order-form-container">
               <label class="field-label" for="service-search">Daftar Layanan Tersedia</label>
@@ -341,18 +478,17 @@ app.get('/', (c) => c.render(
         </div>
       </section>
 
+      <!-- CHECKER VIEW -->
       <section id="checker-view" class="view-panel" hidden>
         <div class="content-grid">
           <section class="panel">
-            <div class="panel-heading"><div><p class="eyebrow">FILTER NOMOR SHOPEE</p><h2>Cek Pendaftaran Shopee</h2></div><span class="step">🔎</span></div>
-            <p class="muted">Periksa apakah nomor HP sudah terdaftar di Shopee. Jika terhubung dengan Order OTP, nomor yang sudah terdaftar akan otomatis dibatalkan!</p>
-            
+            <div class="panel-heading"><div><p class="eyebrow">CEK NOMOR MANUAL</p><h2>Shopee Registration Checker</h2></div></div>
+            <p class="muted">Periksa apakah nomor HP sudah terdaftar di Shopee sebelum membuat order OTP.</p>
             <label class="field-label" for="check-phone-input">Nomor Telepon (Cek Manual)</label>
             <div class="input-row">
               <input id="check-phone-input" type="text" placeholder="Contoh: 08123456789 atau 628123456789" autocomplete="off" data-lpignore="true" data-1p-ignore="true" />
               <button id="run-check-button" class="button button-primary" type="button" style="margin-top:0; width:auto; min-width:110px;">Cek Nomor</button>
             </div>
-
             <div style="margin-top:20px; padding-top:15px; border-top:1px solid var(--line);">
               <label class="field-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                 <input id="auto-cancel-registered" type="checkbox" checked style="width:auto;" />
@@ -360,7 +496,6 @@ app.get('/', (c) => c.render(
               </label>
             </div>
           </section>
-
           <section class="panel">
             <div class="panel-heading"><div><p class="eyebrow">HASIL PENGECEKAN</p><h2>Detail Status Nomor</h2></div></div>
             <div id="checker-result-box" class="placeholder-state">
@@ -370,25 +505,17 @@ app.get('/', (c) => c.render(
           </section>
         </div>
       </section>
-      <section id="activity-view" class="view-panel" hidden><section class="panel"><div class="panel-heading"><div><p class="eyebrow">RIWAYAT SESI</p><h2>Aktivitas terbaru</h2></div><button id="clear-history" class="text-button" type="button">Bersihkan</button></div><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Layanan</th><th>Nomor</th><th>Status</th></tr></thead><tbody id="history-body"><tr><td colspan={4} class="empty-state">Belum ada aktivitas.</td></tr></tbody></table></div></section></section>
-      <section id="settings-view" class="view-panel" hidden>
-        <section class="panel connection-panel" style="margin-bottom: 20px;">
-          <div class="panel-heading"><div><p class="eyebrow">KONEKSI PROVIDER</p><h2>Hubungkan API Key</h2></div><span class="step">🔑</span></div>
-          <p class="muted">Masukkan API key provider untuk mengaktifkan layanan dan saldo. Key hanya disimpan di memori sesi browser.</p>
-          <label class="field-label" for="api-key">API key provider</label>
-          <div class="input-row"><input id="api-key" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="Masukkan API key"/><button id="reveal-key" class="text-button" type="button">Tampilkan</button></div>
-          <div class="field-grid">
-            <label class="field-label">Metode autentikasi
-              <div id="auth-dropdown" class="custom-select"><input id="auth-mode" type="hidden" value="bearer" /><button id="auth-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="auth-label">Bearer token</span><span class="select-chevron">⌄</span></button><div id="auth-options" class="select-options" role="listbox" hidden><button class="select-option is-selected" type="button" role="option" aria-selected="true" data-value="bearer">Bearer token</button><button class="select-option" type="button" role="option" aria-selected="false" data-value="x-api-key">x-api-key header</button></div></div>
-            </label>
-            <label id="header-field" class="field-label">Nama header<input id="header-name" value="x-api-key" autocomplete="off" data-lpignore="true" data-1p-ignore="true" /></label>
-          </div>
-          <div class="button-group" style="margin-top: 15px;">
-            <button id="connect-button" class="button button-primary" type="button" style="flex: 1;">Uji & Simpan Provider</button>
-            <button id="revoke-button" class="button button-danger" type="button" style="flex: 0 0 auto; width: auto;" hidden>Hapus / Revoke Key</button>
-          </div>
-        </section>
 
+      <!-- ACTIVITY VIEW -->
+      <section id="activity-view" class="view-panel" hidden>
+        <section class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">RIWAYAT SESI</p><h2>Aktivitas terbaru</h2></div><button id="clear-history" class="text-button" type="button">Bersihkan</button></div>
+          <div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Layanan</th><th>Nomor</th><th>Status</th></tr></thead><tbody id="history-body"><tr><td colspan="4" class="empty-state">Belum ada aktivitas.</td></tr></tbody></table></div>
+        </section>
+      </section>
+
+      <!-- SETTINGS VIEW -->
+      <section id="settings-view" class="view-panel" hidden>
         <section class="panel settings-card">
           <p class="eyebrow">PREFERENSI TAMPILAN</p><h2>Tema Aplikasi</h2>
           <p class="muted">Pilih tema visual yang Anda sukai. Preferensi disimpan secara otomatis.</p>
@@ -405,8 +532,11 @@ app.get('/', (c) => c.render(
         </section>
       </section>
     </section>
-    <script src="/static/app.js" defer></script>
-  </main>
-))
+  </div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
+  `)
+})
 
 export default app
