@@ -77,9 +77,9 @@ async function authMiddleware(c: any, next: any) {
 // ── Auth Endpoints ──
 app.post('/api/auth/register', async (c) => {
   try {
-    const { email, password } = await c.req.json()
-    if (!email || !password || password.length < 6) {
-      return c.json({ success: false, error: 'Email valid & Password minimal 6 karakter wajib diisi.' }, 400)
+    const { name, email, password } = await c.req.json()
+    if (!name || !email || !password || password.length < 6) {
+      return c.json({ success: false, error: 'Nama, Email, dan Password minimal 6 karakter wajib diisi.' }, 400)
     }
 
     const check = await db.execute({ sql: 'SELECT id FROM users WHERE email = ?', args: [email.toLowerCase().trim()] })
@@ -89,16 +89,17 @@ app.post('/api/auth/register', async (c) => {
 
     const id = 'usr_' + Math.random().toString(36).substring(2, 10)
     const password_hash = await hashPassword(password)
+    const userName = String(name).trim()
     
     await db.execute({
-      sql: 'INSERT INTO users (id, email, password_hash, balance) VALUES (?, ?, ?, 0)',
-      args: [id, email.toLowerCase().trim(), password_hash]
+      sql: 'INSERT INTO users (id, name, email, password_hash, balance) VALUES (?, ?, ?, ?, 0)',
+      args: [id, userName, email.toLowerCase().trim(), password_hash]
     })
 
     const token = await createToken({ id, email: email.toLowerCase().trim(), role: 'user' }, true)
     setCookie(c, 'auth_token', token, { path: '/', httpOnly: true, maxAge: 30 * 24 * 3600, sameSite: 'Lax' })
 
-    return c.json({ success: true, user: { id, email, balance: 0 } })
+    return c.json({ success: true, user: { id, name: userName, email, balance: 0 } })
   } catch (error) { const result = apiError(error); return c.json(result, result.status as 400) }
 })
 
@@ -434,7 +435,7 @@ app.get('*', (c) => {
         </div>
       </header>
       
-      <div id="notification-modal" class="notification-modal" role="presentation" hidden><section class="notification-card"><span id="notification-icon" class="notification-icon">!</span><p id="notification-text" class="notification-text"></p><button id="notification-close" class="notification-close" type="button" aria-label="Tutup">×</button></section></div>
+      <div id="notification-modal" class="notification-modal" style="z-index: 999999;" role="presentation" hidden><section class="notification-card"><span id="notification-icon" class="notification-icon">!</span><p id="notification-text" class="notification-text"></p><button id="notification-close" class="notification-close" type="button" aria-label="Tutup">×</button></section></div>
       <div id="confirm-overlay" class="confirm-overlay" hidden><div class="confirm-box"><h3 id="confirm-title">Konfirmasi</h3><p id="confirm-text"></p><div class="confirm-actions"><button id="confirm-cancel" class="confirm-cancel" type="button">Batal</button><button id="confirm-ok" class="confirm-ok" type="button">Ya, Batalkan</button></div></div></div>
       
       <!-- AUTH MODAL / OVERLAY (LOGIN & REGISTER) -->
@@ -444,12 +445,22 @@ app.get('*', (c) => {
           <p id="auth-form-desc" class="muted" style="margin-bottom:15px; font-size:12px;">Masukkan email & password akun Anda untuk melanjutkan.</p>
           
           <div id="auth-fields">
+            <div id="register-fields" style="display:none;">
+              <label class="field-label" style="margin-top:0;">Nama Lengkap</label>
+              <input id="auth-name" type="text" placeholder="Nama Anda" autocomplete="name" style="margin-bottom:10px;" />
+            </div>
+
             <label class="field-label" style="margin-top:0;">Email</label>
             <input id="auth-email" type="email" placeholder="nama@email.com" autocomplete="email" style="margin-bottom:10px;" />
             
             <label class="field-label" style="margin-top:0;">Password</label>
             <input id="auth-password" type="password" placeholder="Minimal 6 karakter" autocomplete="current-password" style="margin-bottom:12px;" />
             
+            <div id="register-password-confirm" style="display:none;">
+              <label class="field-label" style="margin-top:0;">Konfirmasi Password</label>
+              <input id="auth-password-confirm" type="password" placeholder="Ulangi password" style="margin-bottom:12px;" />
+            </div>
+
             <label id="remember-me-label" class="field-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:0; margin-bottom:15px;">
               <input id="auth-remember" type="checkbox" checked style="width:auto;" />
               <span>Ingat Saya (30 Hari)</span>

@@ -420,23 +420,36 @@
     $('#auth-form-desc').textContent = isRegisterMode ? 'Buat akun baru untuk mulai memesan OTP instan.' : 'Masukkan email & password akun Anda untuk melanjutkan.'
     $('#auth-submit-btn').textContent = isRegisterMode ? 'Daftar Sekarang' : 'Masuk Sekarang'
     $('#auth-switch-btn').textContent = isRegisterMode ? 'Sudah punya akun? Login disini' : 'Belum punya akun? Daftar disini'
+    
+    // Tampilkan / Sembunyikan field tambahan
+    $('#register-fields').style.display = isRegisterMode ? 'block' : 'none'
+    $('#register-password-confirm').style.display = isRegisterMode ? 'block' : 'none'
     $('#remember-me-label').style.display = isRegisterMode ? 'none' : 'flex'
   })
 
   $('#auth-submit-btn')?.addEventListener('click', async () => {
     const email = $('#auth-email').value.trim()
     const password = $('#auth-password').value.trim()
+    const name = $('#auth-name')?.value.trim()
+    const passwordConfirm = $('#auth-password-confirm')?.value.trim()
     const rememberMe = $('#auth-remember').checked
 
     if (!email || !password) return message('Email dan password wajib diisi.')
     if (password.length < 6) return message('Password minimal 6 karakter.')
+    
+    if (isRegisterMode) {
+      if (!name) return message('Nama lengkap wajib diisi.')
+      if (password !== passwordConfirm) return message('Konfirmasi password tidak cocok.')
+    }
 
     const button = $('#auth-submit-btn')
     busy(button, true, isRegisterMode ? 'Mendaftar...' : 'Memproses...')
 
     try {
       const path = isRegisterMode ? '/api/auth/register' : '/api/auth/login'
-      const res = await call(path, { email, password, rememberMe })
+      const payload = isRegisterMode ? { name, email, password } : { email, password, rememberMe }
+      
+      const res = await call(path, payload)
       state.user = res.user
       toggleAuthModal(false)
       message(isRegisterMode ? 'Pendaftaran berhasil!' : 'Berhasil masuk ke akun.', 'success')

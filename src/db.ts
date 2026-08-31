@@ -20,6 +20,7 @@ export async function initDb() {
     await db.execute(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT 'User',
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         balance REAL DEFAULT 0,
@@ -28,6 +29,10 @@ export async function initDb() {
       );
     `)
     
+    try {
+      await db.execute(`ALTER TABLE users ADD COLUMN name TEXT DEFAULT 'User';`)
+    } catch(e) {} // Abaikan jika kolom sudah ada
+
     await db.execute(`
       CREATE TABLE IF NOT EXISTS transactions (
         id TEXT PRIMARY KEY,
